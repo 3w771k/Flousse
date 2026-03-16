@@ -268,7 +268,7 @@ export default function TransactionsPage() {
         <span style={{ fontSize: 12, color: "#AEAEB2", whiteSpace: "nowrap" }}>{txs.length} opérations</span>
       </div>
 
-      {/* O2 — InsightsBanner for transactions (replaces broken AIPanel) */}
+      {/* InsightsBanner */}
       <InsightsBanner tab="transactions" from={insightsFrom} to={insightsTo} />
 
       {/* List */}

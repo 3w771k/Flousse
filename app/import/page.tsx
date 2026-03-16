@@ -144,7 +144,7 @@ export default function ImportPage() {
             <div key={s} style={{ display: "flex", alignItems: "center", flex: s < 5 ? 1 : undefined }}>
               <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
                 <div style={{ width: 26, height: 26, borderRadius: "50%", background: done ? "#34C759" : active ? "#007AFF" : "rgba(0,0,0,0.06)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 600, color: done || active ? "white" : "#AEAEB2" }}>
-                  {done ? "\u2713" : s}
+                  {done ? "✓" : s}
                 </div>
                 <span style={{ fontSize: 10, color: active ? "#007AFF" : "#AEAEB2", whiteSpace: "nowrap" }}>{label}</span>
               </div>

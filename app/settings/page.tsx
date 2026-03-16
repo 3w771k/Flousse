@@ -5,12 +5,13 @@ type Account = { id: string; name: string; bank: string; icon: string; type: str
 type Category = { id: string; name: string; type: string; icon: string; parent_id: string | null; budget: number | null };
 type Rule = { id: number; pattern: string; category_id: string; category_name: string; use_count: number };
 
-type Section = "accounts" | "categories" | "rules" | "patrimoine" | "api" | "export" | "reclassify" | "reset";
+type Section = "accounts" | "categories" | "rules" | "patrimoine" | "context" | "api" | "export" | "reclassify" | "reset";
 const SECTIONS: { id: Section; label: string }[] = [
   { id: "accounts", label: "Comptes" },
   { id: "categories", label: "Catégories" },
   { id: "rules", label: "Règles apprises" },
   { id: "patrimoine", label: "Patrimoine immobilier" },
+  { id: "context", label: "Contexte IA" },
   { id: "api", label: "Clé API Claude" },
   { id: "export", label: "Export" },
   { id: "reclassify", label: "Reclassifier" },
@@ -38,6 +39,8 @@ export default function SettingsPage() {
   const [immoLille40, setImmoLille40] = useState("");
   const [immoLille19, setImmoLille19] = useState("");
   const [immoSaved, setImmoSaved] = useState(false);
+  const [userContext, setUserContext] = useState("");
+  const [contextSaved, setContextSaved] = useState(false);
 
   const loadData = useCallback(async () => {
     try {
@@ -61,6 +64,7 @@ export default function SettingsPage() {
       setImmoSci(settingsData.immo_sci || "300000");
       setImmoLille40(settingsData.immo_lille40 || "200000");
       setImmoLille19(settingsData.immo_lille19 || "100000");
+      setUserContext(settingsData.user_context || "");
       // Init budget state
       const budgets: Record<string, number> = {};
       for (const c of catData as Category[]) {
@@ -173,6 +177,18 @@ export default function SettingsPage() {
     }
   };
 
+  const saveContext = async () => {
+    const res = await fetch("/api/settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ user_context: userContext }),
+    });
+    if (res.ok) {
+      setContextSaved(true);
+      setTimeout(() => setContextSaved(false), 2000);
+    }
+  };
+
   const feImmo = (n: string) => {
     const v = parseInt(n);
     if (isNaN(v)) return "";
@@ -282,7 +298,7 @@ export default function SettingsPage() {
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
                 <div className="section-label">Catégories ({parents.filter((p) => p.type === "expense").length} groupes)</div>
                 <button onClick={saveBudgets} style={{ fontSize: 12, color: budgetSaved ? "#34C759" : "#007AFF", background: "none", border: "none", cursor: "pointer", fontWeight: 500 }}>
-                  {budgetSaved ? "Enregistré \u2713" : "Enregistrer"}
+                  {budgetSaved ? "Enregistré ✓" : "Enregistrer"}
                 </button>
               </div>
               {parents.filter((p) => p.type === "expense").map((parent) => {
@@ -301,7 +317,7 @@ export default function SettingsPage() {
                             onChange={(e) => setSavedBudgets((prev) => ({ ...prev, [parent.id]: parseInt(e.target.value) || 0 }))}
                             style={{ width: 60, padding: "3px 8px", borderRadius: 6, border: "1px solid rgba(0,0,0,0.1)", fontSize: 12, textAlign: "right" }}
                           />
-                          <span style={{ fontSize: 11, color: "#86868B" }}>\u20AC/mois</span>
+                          <span style={{ fontSize: 11, color: "#86868B" }}>€/mois</span>
                         </div>
                       )}
                     </div>
@@ -317,7 +333,7 @@ export default function SettingsPage() {
                               onChange={(e) => setSavedBudgets((prev) => ({ ...prev, [sub.id]: parseInt(e.target.value) || 0 }))}
                               style={{ width: 60, padding: "3px 8px", borderRadius: 6, border: "1px solid rgba(0,0,0,0.1)", fontSize: 12, textAlign: "right" }}
                             />
-                            <span style={{ fontSize: 11, color: "#AEAEB2" }}>\u20AC/mois</span>
+                            <span style={{ fontSize: 11, color: "#AEAEB2" }}>€/mois</span>
                           </div>
                         )}
                       </div>
@@ -346,7 +362,7 @@ export default function SettingsPage() {
                       <td style={{ padding: "10px 8px", fontSize: 12, color: "#86868B" }}>{r.category_name}</td>
                       <td style={{ padding: "10px 0", fontSize: 12, color: "#AEAEB2" }}>{r.use_count}</td>
                       <td style={{ padding: "10px 0" }}>
-                        <button onClick={() => deleteRule(r.id)} style={{ fontSize: 11, color: "#FF3B30", background: "none", border: "none", cursor: "pointer" }}>\u2715</button>
+                        <button onClick={() => deleteRule(r.id)} style={{ fontSize: 11, color: "#FF3B30", background: "none", border: "none", cursor: "pointer" }}>✕</button>
                       </td>
                     </tr>
                   ))}
@@ -379,7 +395,7 @@ export default function SettingsPage() {
                 onClick={saveApiKey}
                 style={{ padding: "10px 20px", borderRadius: 10, border: "none", background: apiSaved ? "#34C759" : "#007AFF", color: "white", fontSize: 13, fontWeight: 500, cursor: "pointer", transition: "background 200ms" }}
               >
-                {apiSaved ? "Enregistré \u2713" : "Enregistrer"}
+                {apiSaved ? "Enregistré ✓" : "Enregistrer"}
               </button>
             </div>
           )}
@@ -460,6 +476,41 @@ export default function SettingsPage() {
               </div>
               <p style={{ fontSize: 11, color: "#AEAEB2", marginTop: 12 }}>
                 "Tout reclassifier" écrase les catégories existantes. Utile après avoir ajouté de nouvelles règles.
+              </p>
+            </div>
+          )}
+
+          {section === "context" && (
+            <div>
+              <div className="section-label mb-2">Contexte IA</div>
+              <p style={{ fontSize: 12, color: "#86868B", marginBottom: 16 }}>
+                Décrivez votre situation personnelle pour affiner les analyses IA.
+                Par exemple : objectifs financiers, événements récents, projets à venir.
+              </p>
+              <textarea
+                value={userContext}
+                onChange={(e) => setUserContext(e.target.value)}
+                placeholder={"Ex: Couple avec 2 enfants (6 et 3 ans). Revenus locatifs suspendus depuis janvier 2025 (travaux). Prêt perso se termine en juillet 2028. Objectif : reconstituer l'épargne de précaution et remettre les appartements en location."}
+                style={{
+                  width: "100%", minHeight: 140, padding: "12px 14px", borderRadius: 10,
+                  border: "1px solid rgba(0,0,0,0.1)", fontSize: 13, color: "#1D1D1F",
+                  background: "white", resize: "vertical", fontFamily: "inherit",
+                  lineHeight: 1.5, outline: "none",
+                }}
+              />
+              <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 12 }}>
+                <button
+                  onClick={saveContext}
+                  style={{ padding: "10px 20px", borderRadius: 10, border: "none", background: contextSaved ? "#34C759" : "#007AFF", color: "white", fontSize: 13, fontWeight: 500, cursor: "pointer", transition: "background 200ms" }}
+                >
+                  {contextSaved ? "Enregistré ✓" : "Enregistrer"}
+                </button>
+                <span style={{ fontSize: 11, color: "#AEAEB2" }}>
+                  {userContext.length > 0 ? `${userContext.length} caractères` : "Aucun contexte défini"}
+                </span>
+              </div>
+              <p style={{ fontSize: 11, color: "#AEAEB2", marginTop: 10 }}>
+                Ce texte est injecté dans les prompts d'analyse et dans le chat IA. Il permet de personnaliser les recommandations.
               </p>
             </div>
           )}

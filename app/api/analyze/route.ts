@@ -92,6 +92,8 @@ function buildFullContext(from: string, to: string) {
   const immoLille40 = getSetting("immo_lille40") || "200000";
   const immoLille19 = getSetting("immo_lille19") || "100000";
 
+  const userContext = getSetting("user_context") || "";
+
   return {
     from, to, monthsDiff,
     income, expense, debt, savings,
@@ -102,12 +104,14 @@ function buildFullContext(from: string, to: string) {
     txJson,
     txCount: txs.length,
     immoSci, immoLille40, immoLille19,
+    userContext,
   };
 }
 
 // ─── System prompt ────────────────────────────────────────────────────────────
 
-const SYSTEM_PROMPT = `You are a financial analysis AI specialized in personal banking transaction analysis.
+function buildSystemPrompt(userContext?: string): string {
+  let prompt = `You are a financial analysis AI specialized in personal banking transaction analysis.
 Your role is to analyze a user's complete financial situation based on their financial summary and raw banking transactions.
 Your analysis must be data-driven, precise, and structured. Avoid generic advice and base every insight strictly on the data provided.
 The goal is to help the user better understand their financial behavior, identify inefficiencies, detect anomalies, and suggest actionable optimizations.
@@ -122,9 +126,13 @@ Financial goals:
 - increase savings
 - reduce unnecessary expenses
 - improve financial visibility
-- identify spending patterns
+- identify spending patterns`;
 
-OUTPUT FORMAT: HTML only (no Markdown). Use <div class="ai-section"> for each section, <div class="ai-section-title"> for section titles, <ul><li> for lists, <strong> for key amounts, <p> for paragraphs.
+  if (userContext && userContext.trim().length > 0) {
+    prompt += `\n\nUSER CONTEXT (personal notes from the user):\n${userContext.trim()}`;
+  }
+
+  prompt += `\n\nOUTPUT FORMAT: HTML only (no Markdown). Use <div class="ai-section"> for each section, <div class="ai-section-title"> for section titles, <ul><li> for lists, <strong> for key amounts, <p> for paragraphs.
 
 STYLE GUIDELINES
 - Use precise numbers when possible.
@@ -133,6 +141,9 @@ STYLE GUIDELINES
 - Avoid vague statements.
 - Keep explanations clear and structured.
 - Write in French.`;
+
+  return prompt;
+}
 
 // ─── Prompts spécifiques par onglet ──────────────────────────────────────────
 
@@ -380,8 +391,12 @@ transactions: ${JSON.stringify(ctx.txJson.slice(0, 150), null, 0)}`;
 
   const instructions = tabInstructions[tab] || tabInstructions["insights-dashboard"];
 
-  return `${header}
+  const contextBlock = ctx.userContext && ctx.userContext.trim().length > 0
+    ? `\nUSER CONTEXT: ${ctx.userContext.trim()}\n`
+    : "";
 
+  return `${header}
+${contextBlock}
 TASK: Generate 2–4 concise financial insights for the "${tab.replace("insights-", "")}" view.
 
 ${instructions}
@@ -570,7 +585,7 @@ export async function POST(req: NextRequest) {
         type: "enabled",
         budget_tokens: thinkingBudget,
       },
-      system: SYSTEM_PROMPT,
+      system: buildSystemPrompt(ctx.userContext),
       messages,
     });
 

@@ -7,7 +7,7 @@ const fe = (n: number) =>
   new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(n);
 const fek = (n: number) =>
   Math.abs(n) >= 1000
-    ? new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 1 }).format(n / 1000) + " k\u20AC"
+    ? new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 1 }).format(n / 1000) + " k€"
     : fe(n);
 
 const PERIODS: { label: string; months: number }[] = [
@@ -247,7 +247,7 @@ export default function DashboardPage() {
                   <div style={{ width: 8, height: 8, borderRadius: "50%", background: color, flexShrink: 0 }} />
                   <span style={{ flex: 1, fontSize: 14, color: "#1D1D1F" }}>{cat!.name}</span>
                   {subEntries.length > 0 && (
-                    <span style={{ fontSize: 10, color: "#AEAEB2" }}>{isExpanded ? "\u25B2" : "\u25BC"}</span>
+                    <span style={{ fontSize: 10, color: "#AEAEB2" }}>{isExpanded ? "▲" : "▼"}</span>
                   )}
                   <div style={{ textAlign: "right" }}>
                     <span style={{ fontSize: 16, fontWeight: 500, color: overBudget ? "#FF3B30" : "#1D1D1F" }}>{fe(total)}</span>

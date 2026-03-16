@@ -10,13 +10,16 @@ const CARDS = [
   { id: "projections",    tab: "analysis-projections",    title: "Projections 6 mois" },
 ];
 
-// "Tout analyser" steps: 4 insights tabs + full dashboard analysis
+// "Tout analyser" steps: 4 insights + 4 analysis cards
 const TOUT_ANALYSER_STEPS: { tab: string; label: string }[] = [
   { tab: "insights-dashboard",    label: "Insights Dashboard" },
   { tab: "insights-transactions", label: "Insights Opérations" },
   { tab: "insights-cashflow",     label: "Insights Cashflow" },
   { tab: "insights-banks",        label: "Insights Comptes" },
-  { tab: "dashboard",             label: "Analyse complète" },
+  { tab: "analysis-synthese",     label: "Synthèse" },
+  { tab: "analysis-anomalies",    label: "Anomalies" },
+  { tab: "analysis-optimisations",label: "Optimisations" },
+  { tab: "analysis-projections",  label: "Projections" },
 ];
 
 // ─── Error code → French message ─────────────────────────────────────────────
@@ -54,7 +57,6 @@ const SparkleIcon = () => (
   </svg>
 );
 
-/** Skeleton: 3 pulsing grey lines for loading state */
 function SkeletonLines() {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -74,7 +76,6 @@ function SkeletonLines() {
   );
 }
 
-/** Timer hook: returns elapsed seconds, starts counting from 0 when active=true */
 function useElapsedTimer(active: boolean): number {
   const [elapsed, setElapsed] = useState(0);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -98,6 +99,10 @@ function useElapsedTimer(active: boolean): number {
   return elapsed;
 }
 
+// ─── Chat message type ───────────────────────────────────────────────────────
+
+type ChatMessage = { role: "user" | "assistant"; content: string };
+
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export default function AnalysisPage() {
@@ -108,7 +113,14 @@ export default function AnalysisPage() {
 
   // "Tout analyser" state
   const [toutAnalyserRunning, setToutAnalyserRunning] = useState(false);
-  const [toutProgress, setToutProgress]               = useState<{ step: number; label: string } | null>(null);
+  const [toutProgress, setToutProgress] = useState<{ step: number; label: string } | null>(null);
+
+  // Chat state
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [chatInput, setChatInput] = useState("");
+  const [chatLoading, setChatLoading] = useState(false);
+  const [chatOpen, setChatOpen] = useState(false);
+  const chatEndRef = useRef<HTMLDivElement>(null);
 
   const { from, to } = getRange();
 
@@ -123,7 +135,6 @@ export default function AnalysisPage() {
             setContents((prev) => ({ ...prev, [card.id]: d.content }));
             setTimestamps((prev) => ({ ...prev, [card.id]: formatDate(d.created_at) }));
           }
-          // If not cached, contents[card.id] stays undefined → shows empty state message
         })
         .catch(() => {});
     }
@@ -158,7 +169,7 @@ export default function AnalysisPage() {
     }
   };
 
-  // ── A2: "Tout analyser" — 5 steps sequentially ─────────────────────────────
+  // ── A2: "Tout analyser" — 8 steps sequentially ─────────────────────────────
   const toutAnalyser = async () => {
     setToutAnalyserRunning(true);
     for (let i = 0; i < TOUT_ANALYSER_STEPS.length; i++) {
@@ -191,6 +202,42 @@ export default function AnalysisPage() {
     setToutAnalyserRunning(false);
   };
 
+  // ── A3: Chat IA ─────────────────────────────────────────────────────────────
+  const sendChat = async () => {
+    const msg = chatInput.trim();
+    if (!msg || chatLoading) return;
+
+    const newMessages: ChatMessage[] = [...chatMessages, { role: "user", content: msg }];
+    setChatMessages(newMessages);
+    setChatInput("");
+    setChatLoading(true);
+
+    try {
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messages: newMessages, from, to }),
+      });
+      const data = await res.json();
+      if (res.ok && data.content) {
+        setChatMessages([...newMessages, { role: "assistant", content: data.content }]);
+      } else {
+        const errCode = data.error || "api_error";
+        const errMsg = ERROR_MESSAGES[errCode] ?? (data.message || "Erreur");
+        setChatMessages([...newMessages, { role: "assistant", content: `<p style="color:#FF3B30">${errMsg}</p>` }]);
+      }
+    } catch {
+      setChatMessages([...newMessages, { role: "assistant", content: '<p style="color:#FF3B30">Erreur de connexion au serveur</p>' }]);
+    } finally {
+      setChatLoading(false);
+    }
+  };
+
+  // Auto-scroll chat
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [chatMessages, chatLoading]);
+
   const anyLoading = loadingId !== null || toutAnalyserRunning;
 
   return (
@@ -210,7 +257,7 @@ export default function AnalysisPage() {
           </div>
         </div>
 
-        {/* A2: Tout analyser button */}
+        {/* Tout analyser button */}
         <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6 }}>
           <button
             onClick={toutAnalyser}
@@ -228,20 +275,19 @@ export default function AnalysisPage() {
               transition: "opacity 150ms ease",
             }}
           >
-            {toutAnalyserRunning ? "Génération\u2026" : "Tout analyser"}
+            {toutAnalyserRunning ? "Génération…" : "Tout analyser"}
           </button>
 
-          {/* Progress indicator */}
           {toutProgress && (
             <div style={{ fontSize: 12, color: "#86868B", textAlign: "right" }}>
-              Génération {toutProgress.step}/{TOUT_ANALYSER_STEPS.length} — {toutProgress.label}...
+              Génération {toutProgress.step}/{TOUT_ANALYSER_STEPS.length} — {toutProgress.label}…
             </div>
           )}
         </div>
       </div>
 
       {/* Cards grid */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 24 }}>
         {CARDS.map((card) => (
           <AnalysisCard
             key={card.id}
@@ -254,6 +300,152 @@ export default function AnalysisPage() {
             onGenerate={(force) => generate(card.id, card.tab, force)}
           />
         ))}
+      </div>
+
+      {/* Chat IA section */}
+      <div className="rounded-apple" style={{ background: "#F5F5F7", overflow: "hidden" }}>
+        {/* Chat header — click to toggle */}
+        <button
+          onClick={() => setChatOpen(!chatOpen)}
+          style={{
+            width: "100%", display: "flex", alignItems: "center", gap: 10,
+            padding: "16px 24px", background: "none", border: "none", cursor: "pointer",
+          }}
+        >
+          <SparkleIcon />
+          <span style={{ fontSize: 14, fontWeight: 500, color: "#1D1D1F", flex: 1, textAlign: "left" }}>
+            Chat IA — Posez vos questions
+          </span>
+          <span style={{ fontSize: 12, color: "#AEAEB2" }}>
+            {chatMessages.length > 0 ? `${Math.floor(chatMessages.length / 2)} échange${Math.floor(chatMessages.length / 2) !== 1 ? "s" : ""}` : ""}
+          </span>
+          <span style={{ fontSize: 12, color: "#86868B", transition: "transform 150ms", transform: chatOpen ? "rotate(180deg)" : "none" }}>▼</span>
+        </button>
+
+        {chatOpen && (
+          <div style={{ borderTop: "1px solid rgba(0,0,0,0.04)" }}>
+            {/* Messages area */}
+            <div style={{ maxHeight: 450, overflowY: "auto", padding: "16px 24px" }}>
+              {chatMessages.length === 0 && !chatLoading && (
+                <div style={{ textAlign: "center", padding: "24px 0" }}>
+                  <div style={{ fontSize: 13, color: "#AEAEB2", marginBottom: 12 }}>
+                    Posez une question sur vos finances.
+                  </div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "center" }}>
+                    {[
+                      "Comment réduire mes dépenses alimentation ?",
+                      "Quand est-ce que mon prêt perso se termine ?",
+                      "Combien je dépense en abonnements ?",
+                      "Quelle est ma capacité d'épargne réelle ?",
+                    ].map((q) => (
+                      <button
+                        key={q}
+                        onClick={() => { setChatInput(q); }}
+                        style={{
+                          padding: "6px 12px", borderRadius: 8, fontSize: 12,
+                          background: "rgba(0,122,255,0.06)", color: "#007AFF",
+                          border: "1px solid rgba(0,122,255,0.12)", cursor: "pointer",
+                        }}
+                      >
+                        {q}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {chatMessages.map((msg, i) => (
+                <div
+                  key={i}
+                  style={{
+                    marginBottom: 12,
+                    display: "flex",
+                    justifyContent: msg.role === "user" ? "flex-end" : "flex-start",
+                  }}
+                >
+                  <div
+                    style={{
+                      maxWidth: "85%",
+                      padding: "10px 14px",
+                      borderRadius: msg.role === "user" ? "14px 14px 4px 14px" : "14px 14px 14px 4px",
+                      background: msg.role === "user" ? "#007AFF" : "white",
+                      color: msg.role === "user" ? "white" : "#1D1D1F",
+                      fontSize: 13,
+                      lineHeight: 1.5,
+                      border: msg.role === "assistant" ? "1px solid rgba(0,0,0,0.06)" : "none",
+                    }}
+                  >
+                    {msg.role === "user" ? (
+                      msg.content
+                    ) : (
+                      <div
+                        className="ai-content"
+                        style={{ fontSize: 13, lineHeight: 1.6 }}
+                        dangerouslySetInnerHTML={{ __html: msg.content }}
+                      />
+                    )}
+                  </div>
+                </div>
+              ))}
+
+              {chatLoading && (
+                <div style={{ display: "flex", justifyContent: "flex-start", marginBottom: 12 }}>
+                  <div style={{
+                    padding: "12px 16px", borderRadius: "14px 14px 14px 4px",
+                    background: "white", border: "1px solid rgba(0,0,0,0.06)",
+                  }}>
+                    <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+                      {[0, 1, 2].map((i) => (
+                        <div
+                          key={i}
+                          className="skeleton-pulse"
+                          style={{
+                            width: 6, height: 6, borderRadius: "50%",
+                            background: "#AEAEB2",
+                            animationDelay: `${i * 0.2}s`,
+                          }}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+              <div ref={chatEndRef} />
+            </div>
+
+            {/* Input area */}
+            <div style={{
+              display: "flex", gap: 8, padding: "12px 24px 16px",
+              borderTop: "1px solid rgba(0,0,0,0.04)",
+              background: "rgba(0,0,0,0.01)",
+            }}>
+              <input
+                value={chatInput}
+                onChange={(e) => setChatInput(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendChat(); } }}
+                placeholder="Posez une question sur vos finances…"
+                disabled={chatLoading}
+                style={{
+                  flex: 1, padding: "10px 14px", borderRadius: 10,
+                  border: "1px solid rgba(0,0,0,0.08)", background: "white",
+                  fontSize: 13, color: "#1D1D1F", outline: "none",
+                }}
+              />
+              <button
+                onClick={sendChat}
+                disabled={chatLoading || !chatInput.trim()}
+                style={{
+                  padding: "10px 16px", borderRadius: 10, border: "none",
+                  background: chatLoading || !chatInput.trim() ? "rgba(0,122,255,0.3)" : "#007AFF",
+                  color: "white", fontSize: 13, fontWeight: 500,
+                  cursor: chatLoading || !chatInput.trim() ? "default" : "pointer",
+                }}
+              >
+                Envoyer
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -274,7 +466,6 @@ interface AnalysisCardProps {
 }
 
 function AnalysisCard({ card, content, timestamp, isLoading, anyLoading, error, onGenerate }: AnalysisCardProps) {
-  // D6: elapsed timer — starts when isLoading becomes true
   const elapsed = useElapsedTimer(isLoading);
   const showTimer = isLoading && elapsed >= 5;
 
@@ -295,10 +486,9 @@ function AnalysisCard({ card, content, timestamp, isLoading, anyLoading, error, 
         </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          {/* D6: timer badge */}
           {showTimer && (
             <span style={{ fontSize: 11, color: "#86868B" }}>
-              {elapsed} secondes...
+              {elapsed} secondes…
             </span>
           )}
 
@@ -343,7 +533,7 @@ function AnalysisCard({ card, content, timestamp, isLoading, anyLoading, error, 
         </div>
       )}
 
-      {/* D6: Error message */}
+      {/* Error message */}
       {error && !isLoading && (
         <div
           style={{
@@ -360,20 +550,18 @@ function AnalysisCard({ card, content, timestamp, isLoading, anyLoading, error, 
         </div>
       )}
 
-      {/* D6: Skeleton while loading */}
+      {/* Content */}
       {isLoading ? (
         <div style={{ paddingTop: 4 }}>
           <SkeletonLines />
         </div>
       ) : content ? (
-        // A1: Render cached/generated HTML content
         <div
           className="ai-content"
           style={{ fontSize: 13, color: "#86868B", lineHeight: 1.6, maxHeight: 400, overflowY: "auto" }}
           dangerouslySetInnerHTML={{ __html: content }}
         />
       ) : (
-        // A1: Empty state when not cached
         <p style={{ fontSize: 13, color: "#AEAEB2", margin: 0 }}>
           Pas encore d&apos;analyse pour cette période — cliquez Générer.
         </p>

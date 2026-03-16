@@ -1,6 +1,5 @@
 "use client";
 import { useState, useEffect, useRef } from "react";
-import AIPanel from "@/components/AIPanel";
 import InsightsBanner from "@/components/InsightsBanner";
 
 const fe = (n: number) =>
@@ -11,7 +10,7 @@ const fe2 = (n: number) =>
 
 const fek = (n: number) =>
   Math.abs(n) >= 1000
-    ? new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 1 }).format(n / 1000) + " k\u20AC"
+    ? new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 1 }).format(n / 1000) + " k€"
     : fe(n);
 
 type Account = {
@@ -22,8 +21,8 @@ type Account = {
 type Settings = Record<string, string>;
 
 const TYPE_LABELS: Record<string, string> = {
-  liquidites: "Liquidit\u00e9s", epargne: "\u00c9pargne", credit: "Cr\u00e9dit",
-  carte: "Carte diff\u00e9r\u00e9e", bourse: "Bourse",
+  liquidites: "Liquidités", epargne: "Épargne", credit: "Crédit",
+  carte: "Carte différée", bourse: "Bourse",
 };
 
 // Helper: get credit metadata for an account from settings
@@ -72,8 +71,6 @@ export default function BanksPage() {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [settings, setSettings] = useState<Settings>({});
   const [loading, setLoading] = useState(true);
-  const [aiContent, setAiContent] = useState<string | null>(null);
-  const [aiLoading, setAiLoading] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
@@ -123,37 +120,6 @@ export default function BanksPage() {
     loadAccounts();
   };
 
-  const [aiDate, setAiDate] = useState<string | null>(null);
-
-  // Load cached analysis on mount
-  useEffect(() => {
-    fetch(`/api/analyze?tab=banks&from=${insightsFrom}&to=${insightsTo}`)
-      .then((r) => r.json())
-      .then((d) => { if (d.cached && d.content) { setAiContent(d.content); setAiDate(d.created_at); } })
-      .catch(() => {});
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const refreshAI = async (force = false) => {
-    setAiLoading(true);
-    try {
-      const res = await fetch("/api/analyze", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tab: "banks", from: insightsFrom, to: insightsTo, force }),
-      });
-      const d = await res.json();
-      if (res.ok) {
-        setAiContent(d.content || "Aucun contenu");
-        setAiDate(d.created_at || null);
-      } else {
-        setAiContent(d.message || d.error || "Erreur API");
-      }
-    } catch {
-      setAiContent("Erreur de connexion");
-    }
-    setAiLoading(false);
-  };
-
   // Compute patrimoine figures
   const liquidites = accounts
     .filter((a) => a.type === "liquidites")
@@ -193,20 +159,20 @@ export default function BanksPage() {
       </div>
 
       {loading ? (
-        <div style={{ color: "#AEAEB2", fontSize: 13 }}>Chargement\u2026</div>
+        <div style={{ color: "#AEAEB2", fontSize: 13 }}>Chargement…</div>
       ) : (
         <>
           {/* B3 — Patrimoine section */}
           <div className="rounded-apple-lg mb-6" style={{ background: "#F5F5F7", display: "grid", gridTemplateColumns: "1fr 1px 1fr 1px 1fr 1px 1fr 1px 1fr" }}>
             {[
               {
-                label: "Liquidit\u00e9s",
+                label: "Liquidités",
                 value: liquidites,
                 color: "#34C759",
                 sub: "Comptes courants",
               },
               {
-                label: "\u00c9pargne & Bourse",
+                label: "Épargne & Bourse",
                 value: epargne,
                 color: "#34C759",
                 sub: "Livrets, PEA",
@@ -215,20 +181,20 @@ export default function BanksPage() {
                 label: "Immobilier",
                 value: immobilier,
                 color: "#34C759",
-                sub: `SCI ${fek(immoSci)} · 40m\u00b2 ${fek(immoLille40)} · 19m\u00b2 ${fek(immoLille19)}`,
+                sub: `SCI ${fek(immoSci)} · 40m² ${fek(immoLille40)} · 19m² ${fek(immoLille19)}`,
               },
               {
-                label: "Cr\u00e9dits restants",
+                label: "Crédits restants",
                 value: creditsTotal,
                 color: "#FF3B30",
-                sub: "Capital restant d\u00fb total",
+                sub: "Capital restant dû total",
                 negate: true,
               },
               {
                 label: "Patrimoine net",
                 value: patrimoineNet,
                 color: patrimoineNet >= 0 ? "#34C759" : "#FF3B30",
-                sub: "Actifs \u2212 dettes",
+                sub: "Actifs − dettes",
                 bold: true,
               },
             ].map((item, i) => (
@@ -246,7 +212,7 @@ export default function BanksPage() {
                       marginBottom: 5,
                     }}
                   >
-                    {item.negate ? `\u2212\u202f${fek(item.value)}` : fek(item.value)}
+                    {item.negate ? `−\u202F${fek(item.value)}` : fek(item.value)}
                   </div>
                   <div style={{ fontSize: 10, color: "#AEAEB2", lineHeight: 1.4 }}>{item.sub}</div>
                 </div>
@@ -254,7 +220,7 @@ export default function BanksPage() {
             ))}
           </div>
 
-          {/* B2b — InsightsBanner */}
+          {/* InsightsBanner */}
           <InsightsBanner tab="banks" from={insightsFrom} to={insightsTo} />
 
           {/* Bank totals summary row */}
@@ -270,18 +236,6 @@ export default function BanksPage() {
                 </div>
               );
             })}
-          </div>
-
-          {/* AI Panel */}
-          <div className="mb-6">
-            <AIPanel
-              title="Optimiser mes comptes"
-              content={aiContent || `<p style="color:#AEAEB2">Cliquez sur "G\u00e9n\u00e9rer" pour analyser vos comptes.</p>`}
-              timestamp={aiDate ? new Date(aiDate + "Z").toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" }) : ""}
-              onRefresh={() => refreshAI(false)}
-              onForceRefresh={aiDate ? () => refreshAI(true) : undefined}
-              refreshLoading={aiLoading}
-            />
           </div>
 
           {/* Per bank — account cards */}
@@ -338,7 +292,7 @@ export default function BanksPage() {
                         ) : (
                           <div
                             onClick={() => startEdit(acct)}
-                            title="Cliquez pour ajuster le solde r\u00e9el"
+                            title="Cliquez pour ajuster le solde réel"
                             style={{
                               fontSize: isCredit ? 22 : 20,
                               fontWeight: 300,
@@ -367,7 +321,7 @@ export default function BanksPage() {
                             >
                               {meta.mensualite != null && (
                                 <div>
-                                  <div style={{ fontSize: 10, color: "#86868B" }}>Mensualit\u00e9</div>
+                                  <div style={{ fontSize: 10, color: "#86868B" }}>Mensualité</div>
                                   <div style={{ fontSize: 12, fontWeight: 500, color: "#1D1D1F" }}>
                                     {fe2(meta.mensualite)}
                                   </div>
@@ -377,7 +331,7 @@ export default function BanksPage() {
                                 <div>
                                   <div style={{ fontSize: 10, color: "#86868B" }}>Taux</div>
                                   <div style={{ fontSize: 12, fontWeight: 500, color: "#1D1D1F" }}>
-                                    {meta.taux.toFixed(2)}\u202f%
+                                    {meta.taux.toFixed(2)}{"\u202F"}%
                                   </div>
                                 </div>
                               )}

@@ -1,6 +1,6 @@
 "use client";
-import { useState, useEffect, useCallback } from "react";
-import AIPanel from "@/components/AIPanel";
+import { useState, useEffect, useCallback, useMemo } from "react";
+import InsightsBanner from "@/components/InsightsBanner";
 
 const fe = (n: number) =>
   new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" }).format(n);
@@ -89,8 +89,16 @@ export default function TransactionsPage() {
   const [cats, setCats] = useState<Map<string, Category>>(new Map());
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [loading, setLoading] = useState(true);
-  const [aiContent, setAiContent] = useState<string | null>(null);
-  const [aiLoading, setAiLoading] = useState(false);
+
+  // Compute from/to for InsightsBanner
+  const { from: insightsFrom, to: insightsTo } = useMemo(() => {
+    const month = selectedMonth || new Date().toISOString().slice(0, 7);
+    const [y, m] = month.split("-").map(Number);
+    const from = `${y}-${String(m).padStart(2, "0")}-01`;
+    const lastDay = new Date(y, m, 0).getDate();
+    const to = `${y}-${String(m).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
+    return { from, to };
+  }, [selectedMonth]);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -137,46 +145,6 @@ export default function TransactionsPage() {
     if (!res.ok) {
       setTxs(prevTxs);
     }
-  };
-
-  const [aiDate, setAiDate] = useState<string | null>(null);
-
-  // Load cached analysis when month changes
-  useEffect(() => {
-    if (!selectedMonth) return;
-    const [y, m] = selectedMonth.split("-").map(Number);
-    const from = `${y}-${String(m).padStart(2, "0")}-01`;
-    const lastDay = new Date(y, m, 0).getDate();
-    const to = `${y}-${String(m).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
-    fetch(`/api/analyze?tab=transactions&from=${from}&to=${to}`)
-      .then((r) => r.json())
-      .then((d) => { if (d.cached && d.content) { setAiContent(d.content); setAiDate(d.created_at); } else { setAiContent(null); setAiDate(null); } })
-      .catch(() => {});
-  }, [selectedMonth]);
-
-  const refreshAI = async (force = false) => {
-    setAiLoading(true);
-    const month = selectedMonth || new Date().toISOString().slice(0, 7);
-    const [y, m] = month.split("-").map(Number);
-    const from = `${y}-${String(m).padStart(2, "0")}-01`;
-    const lastDay = new Date(y, m, 0).getDate();
-    const to = `${y}-${String(m).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
-    try {
-      const res = await fetch("/api/analyze", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tab: "transactions", from, to, force }),
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setAiContent(data.content || "Aucun contenu");
-        setAiDate(data.created_at || null);
-      } else {
-        setAiContent(data.message || data.error || "Erreur API");
-      }
-    } catch {
-      setAiContent("Erreur de connexion");
-    }
-    setAiLoading(false);
   };
 
   const expenseParents = Array.from(cats.values()).filter((c) => !c.parent_id);
@@ -243,46 +211,70 @@ export default function TransactionsPage() {
       </div>
 
       {/* Filters */}
-      <div style={{ display: "flex", gap: 8, marginBottom: 20, alignItems: "center" }}>
+      <div style={{ display: "flex", gap: 8, marginBottom: 16, alignItems: "center" }}>
         <div style={{ flex: 1 }}>
+          {/* O1 — use actual ellipsis character, not escaped unicode */}
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Rechercher\u2026"
+            placeholder="Rechercher…"
             style={{ width: "100%", padding: "8px 14px", borderRadius: 8, border: "none", background: "#F5F5F7", fontSize: 13, color: "#1D1D1F", outline: "none" }}
           />
         </div>
-        <select value={accountFilter} onChange={(e) => setAccountFilter(e.target.value)}
-          style={{ padding: "8px 12px", borderRadius: 8, border: "none", background: "#F5F5F7", fontSize: 12, color: "#86868B", cursor: "pointer" }}>
-          <option value="all">Tous les comptes</option>
-          {accounts.map((a) => <option key={a.id} value={a.id}>{a.bank} — {a.name}</option>)}
-        </select>
-        <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)}
-          style={{ padding: "8px 12px", borderRadius: 8, border: "none", background: "#F5F5F7", fontSize: 12, color: "#86868B", cursor: "pointer" }}>
-          <option value="all">Toutes catégories</option>
-          {expenseParents.filter((p) => p.type === "expense").map((p) => (
-            <option key={p.id} value={p.id}>{p.name}</option>
-          ))}
-        </select>
+        <div style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
+          <select
+            value={accountFilter}
+            onChange={(e) => setAccountFilter(e.target.value)}
+            style={{
+              appearance: "none", WebkitAppearance: "none",
+              padding: "8px 32px 8px 12px",
+              borderRadius: 8, border: "none",
+              background: "rgba(0,0,0,0.04)",
+              fontSize: 12, cursor: "pointer",
+              color: accountFilter === "all" ? "#86868B" : "#1D1D1F",
+              outline: "none",
+            }}
+            onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(0,0,0,0.07)")}
+            onMouseLeave={(e) => (e.currentTarget.style.background = "rgba(0,0,0,0.04)")}
+          >
+            <option value="all">Tous les comptes</option>
+            {accounts.map((a) => <option key={a.id} value={a.id}>{a.bank} — {a.name}</option>)}
+          </select>
+          <span style={{ position: "absolute", right: 10, pointerEvents: "none", color: "#86868B", fontSize: 10 }}>▾</span>
+        </div>
+        <div style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
+          <select
+            value={categoryFilter}
+            onChange={(e) => setCategoryFilter(e.target.value)}
+            style={{
+              appearance: "none", WebkitAppearance: "none",
+              padding: "8px 32px 8px 12px",
+              borderRadius: 8, border: "none",
+              background: "rgba(0,0,0,0.04)",
+              fontSize: 12, cursor: "pointer",
+              color: categoryFilter === "all" ? "#86868B" : "#1D1D1F",
+              outline: "none",
+            }}
+            onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(0,0,0,0.07)")}
+            onMouseLeave={(e) => (e.currentTarget.style.background = "rgba(0,0,0,0.04)")}
+          >
+            <option value="all">Toutes catégories</option>
+            {expenseParents.filter((p) => p.type === "expense").map((p) => (
+              <option key={p.id} value={p.id}>{p.name}</option>
+            ))}
+          </select>
+          <span style={{ position: "absolute", right: 10, pointerEvents: "none", color: "#86868B", fontSize: 10 }}>▾</span>
+        </div>
         <span style={{ fontSize: 12, color: "#AEAEB2", whiteSpace: "nowrap" }}>{txs.length} opérations</span>
       </div>
 
-      {/* AI Panel */}
-      <div className="mb-5">
-        <AIPanel
-          title="Vérifier les classifications"
-          content={aiContent || `<p>${unclassified > 0 ? `<strong style="color:#FF9500">${unclassified} transaction${unclassified > 1 ? "s" : ""} non classée${unclassified > 1 ? "s" : ""}</strong> à corriger.` : "Toutes les transactions sont classées."}</p>`}
-          timestamp={aiDate ? new Date(aiDate + "Z").toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" }) : ""}
-          onRefresh={() => refreshAI(false)}
-          onForceRefresh={aiDate ? () => refreshAI(true) : undefined}
-          refreshLoading={aiLoading}
-        />
-      </div>
+      {/* O2 — InsightsBanner for transactions (replaces broken AIPanel) */}
+      <InsightsBanner tab="transactions" from={insightsFrom} to={insightsTo} />
 
       {/* List */}
       {loading ? (
         <div className="rounded-apple" style={{ background: "#F5F5F7", padding: "20px 24px", color: "#AEAEB2", textAlign: "center", fontSize: 13 }}>
-          Chargement\u2026
+          Chargement…
         </div>
       ) : (
         <div className="rounded-apple" style={{ background: "#F5F5F7", padding: "4px 20px" }}>
@@ -312,7 +304,7 @@ export default function TransactionsPage() {
                     onClick={() => setEditingId(isEditing ? null : t.id)}
                     style={{ fontSize: 11, color: isUnclassified ? "#FF9500" : "#86868B", background: "none", border: "none", cursor: "pointer", padding: "2px 0" }}
                   >
-                    {parentCat ? `${parentCat.name} \u203A ${cat?.name}` : cat?.name}
+                    {parentCat ? `${parentCat.name} › ${cat?.name}` : cat?.name}
                   </button>
                   {isEditing && (
                     <GroupedDropdown

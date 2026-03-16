@@ -82,15 +82,19 @@ export default function DashboardPage() {
     setAiLoading(true);
     setAiContent(null);
     try {
-      const res = await fetch("/api/analyze", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ type: "synthese" }) });
+      const res = await fetch("/api/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tab: "dashboard", from: range.from, to: range.to }),
+      });
       const data = await res.json();
       if (!res.ok) {
-        setAiContent(data.message || data.error || "Erreur API");
+        setAiContent(`<p>${data.message || data.error || "Erreur API"}</p>`);
       } else {
-        setAiContent(data.content || "Aucun contenu");
+        setAiContent(data.content || "<p>Aucun contenu généré.</p>");
       }
     } catch {
-      setAiContent("Erreur de connexion");
+      setAiContent("<p>Erreur de connexion à l'API.</p>");
     }
     setAiLoading(false);
   };

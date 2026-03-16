@@ -138,6 +138,7 @@ function slugify(name: string): string {
 }
 
 const BATCH_SIZE = 25;
+const CONCURRENCY = 5;
 
 // Classify a batch of transactions with Claude
 export async function classifyWithClaude(
@@ -167,17 +168,25 @@ export async function classifyWithClaude(
     return `  ${p.id}: ${p.name} (${p.type})${kidsList ? "\n" + kidsList : ""}`;
   }).join("\n");
 
-  // Split into batches to avoid token limit issues
-  const allResults: ClassifyResult[] = [];
-
+  // Split into batches
+  const batches: TxToClassify[][] = [];
   for (let i = 0; i < transactions.length; i += BATCH_SIZE) {
-    const batch = transactions.slice(i, i + BATCH_SIZE);
-    const batchResults = await classifyBatch(db, batch, catTree, categories, parents, apiKey);
-    allResults.push(...batchResults);
+    batches.push(transactions.slice(i, i + BATCH_SIZE));
   }
 
+  // Run batches in parallel with a concurrency limit
+  const allResults: ClassifyResult[] = new Array(batches.length);
+  for (let i = 0; i < batches.length; i += CONCURRENCY) {
+    const chunk = batches.slice(i, i + CONCURRENCY);
+    const chunkResults = await Promise.all(
+      chunk.map((batch) => classifyBatch(db, batch, catTree, categories, parents, apiKey))
+    );
+    chunkResults.forEach((r, j) => { allResults[i + j] = r; });
+  }
+  const flatResults = allResults.flat();
+
   // Auto-create rules for high-confidence classifications
-  for (const r of allResults) {
+  for (const r of flatResults) {
     if (r.confidence >= 0.8 && r.categoryId !== "divers") {
       const tx = transactions.find((t) => t.id === r.id);
       if (tx) {
@@ -191,7 +200,7 @@ export async function classifyWithClaude(
     }
   }
 
-  return allResults;
+  return flatResults;
 }
 
 async function classifyBatch(

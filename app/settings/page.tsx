@@ -5,13 +5,14 @@ type Account = { id: string; name: string; bank: string; icon: string; type: str
 type Category = { id: string; name: string; type: string; icon: string; parent_id: string | null; budget: number | null };
 type Rule = { id: number; pattern: string; category_id: string; category_name: string; use_count: number };
 
-type Section = "accounts" | "categories" | "rules" | "api" | "export" | "reset";
+type Section = "accounts" | "categories" | "rules" | "api" | "export" | "reclassify" | "reset";
 const SECTIONS: { id: Section; label: string }[] = [
   { id: "accounts", label: "Comptes" },
   { id: "categories", label: "Catégories" },
   { id: "rules", label: "Règles apprises" },
   { id: "api", label: "Clé API Claude" },
   { id: "export", label: "Export" },
+  { id: "reclassify", label: "Reclassifier" },
   { id: "reset", label: "Reset" },
 ];
 
@@ -28,6 +29,10 @@ export default function SettingsPage() {
   const [apiError, setApiError] = useState<string | null>(null);
   const [budgetSaved, setBudgetSaved] = useState(false);
   const [resetDone, setResetDone] = useState(false);
+  const [reclassifyStats, setReclassifyStats] = useState<{ total: number; unclassified: number } | null>(null);
+  const [reclassifying, setReclassifying] = useState(false);
+  const [reclassifyResult, setReclassifyResult] = useState<{ total: number; reclassifiedByRules: number; reclassifiedByAI: number; stillUnclassified: number } | null>(null);
+  const [reclassifyError, setReclassifyError] = useState<string | null>(null);
 
   const loadData = useCallback(async () => {
     try {
@@ -60,6 +65,39 @@ export default function SettingsPage() {
   }, []);
 
   useEffect(() => { loadData(); }, [loadData]);
+
+  const loadReclassifyStats = useCallback(async () => {
+    const res = await fetch("/api/reclassify");
+    if (res.ok) setReclassifyStats(await res.json());
+  }, []);
+
+  useEffect(() => {
+    if (section === "reclassify") loadReclassifyStats();
+  }, [section, loadReclassifyStats]);
+
+  const runReclassify = async (mode: "unclassified" | "all") => {
+    setReclassifying(true);
+    setReclassifyResult(null);
+    setReclassifyError(null);
+    try {
+      const res = await fetch("/api/reclassify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setReclassifyError(data.error || "Erreur");
+      } else {
+        setReclassifyResult(data);
+        loadReclassifyStats();
+      }
+    } catch {
+      setReclassifyError("Erreur réseau");
+    } finally {
+      setReclassifying(false);
+    }
+  };
 
   const deleteAccount = async (id: string) => {
     const prev = accounts;
@@ -329,6 +367,68 @@ export default function SettingsPage() {
                   <button onClick={e.action} style={{ fontSize: 12, color: "#007AFF", background: "none", border: "none", cursor: "pointer", fontWeight: 500 }}>Télécharger</button>
                 </div>
               ))}
+            </div>
+          )}
+
+          {section === "reclassify" && (
+            <div>
+              <div className="section-label mb-2">Reclassifier les transactions</div>
+              <p style={{ fontSize: 12, color: "#86868B", marginBottom: 16 }}>
+                Ré-applique les règles et l&apos;IA sur les transactions existantes, sans avoir à réimporter les fichiers CSV.
+              </p>
+
+              {reclassifyStats && (
+                <div style={{ display: "flex", gap: 12, marginBottom: 20 }}>
+                  <div style={{ flex: 1, padding: "12px 16px", borderRadius: 10, background: "rgba(0,0,0,0.03)", border: "1px solid rgba(0,0,0,0.06)" }}>
+                    <div style={{ fontSize: 22, fontWeight: 600, color: "#1D1D1F" }}>{reclassifyStats.total.toLocaleString("fr-FR")}</div>
+                    <div style={{ fontSize: 11, color: "#86868B", marginTop: 2 }}>transactions au total</div>
+                  </div>
+                  <div style={{ flex: 1, padding: "12px 16px", borderRadius: 10, background: reclassifyStats.unclassified > 0 ? "rgba(255,149,0,0.06)" : "rgba(52,199,89,0.06)", border: `1px solid ${reclassifyStats.unclassified > 0 ? "rgba(255,149,0,0.15)" : "rgba(52,199,89,0.15)"}` }}>
+                    <div style={{ fontSize: 22, fontWeight: 600, color: reclassifyStats.unclassified > 0 ? "#FF9500" : "#34C759" }}>{reclassifyStats.unclassified.toLocaleString("fr-FR")}</div>
+                    <div style={{ fontSize: 11, color: "#86868B", marginTop: 2 }}>non classées</div>
+                  </div>
+                </div>
+              )}
+
+              {reclassifyResult && (
+                <div style={{ padding: "12px 16px", borderRadius: 10, background: "rgba(52,199,89,0.06)", border: "1px solid rgba(52,199,89,0.15)", marginBottom: 16 }}>
+                  <div style={{ fontSize: 13, fontWeight: 500, color: "#34C759", marginBottom: 8 }}>Reclassification terminée</div>
+                  <div style={{ fontSize: 12, color: "#86868B", display: "flex", flexDirection: "column", gap: 4 }}>
+                    <span>{reclassifyResult.total.toLocaleString("fr-FR")} transactions traitées</span>
+                    <span>{reclassifyResult.reclassifiedByRules.toLocaleString("fr-FR")} classées par règles</span>
+                    <span>{reclassifyResult.reclassifiedByAI.toLocaleString("fr-FR")} classées par IA</span>
+                    {reclassifyResult.stillUnclassified > 0 && (
+                      <span style={{ color: "#FF9500" }}>{reclassifyResult.stillUnclassified.toLocaleString("fr-FR")} encore non classées</span>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {reclassifyError && (
+                <div style={{ padding: "10px 14px", borderRadius: 10, background: "rgba(255,59,48,0.06)", color: "#FF3B30", fontSize: 12, marginBottom: 16 }}>
+                  {reclassifyError}
+                </div>
+              )}
+
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                <button
+                  onClick={() => runReclassify("unclassified")}
+                  disabled={reclassifying || reclassifyStats?.unclassified === 0}
+                  style={{ padding: "10px 20px", borderRadius: 10, border: "none", background: reclassifying || reclassifyStats?.unclassified === 0 ? "rgba(0,122,255,0.3)" : "#007AFF", color: "white", fontSize: 13, fontWeight: 500, cursor: reclassifying || reclassifyStats?.unclassified === 0 ? "default" : "pointer", textAlign: "left" }}
+                >
+                  {reclassifying ? "Reclassification en cours…" : `Reclassifier les non classées${reclassifyStats ? ` (${reclassifyStats.unclassified})` : ""}`}
+                </button>
+                <button
+                  onClick={() => runReclassify("all")}
+                  disabled={reclassifying || reclassifyStats?.total === 0}
+                  style={{ padding: "10px 20px", borderRadius: 10, border: "1px solid rgba(0,0,0,0.1)", background: "transparent", color: reclassifying ? "#AEAEB2" : "#1D1D1F", fontSize: 13, fontWeight: 400, cursor: reclassifying ? "default" : "pointer", textAlign: "left" }}
+                >
+                  Tout reclassifier{reclassifyStats ? ` (${reclassifyStats.total.toLocaleString("fr-FR")} transactions)` : ""}
+                </button>
+              </div>
+              <p style={{ fontSize: 11, color: "#AEAEB2", marginTop: 12 }}>
+                "Tout reclassifier" écrase les catégories existantes. Utile après avoir ajouté de nouvelles règles.
+              </p>
             </div>
           )}
 

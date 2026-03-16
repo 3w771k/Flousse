@@ -1,6 +1,6 @@
 "use client";
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import AIPanel from "@/components/AIPanel";
+import { useState, useEffect, useCallback, useMemo } from "react";
+import InsightsBanner from "@/components/InsightsBanner";
 import DonutChart from "@/components/DonutChart";
 
 const fe = (n: number) =>
@@ -29,50 +29,67 @@ type Transaction = {
 };
 type Category = { id: string; name: string; type: string; parent_id: string | null; budget: number | null };
 
-function getDateRange(months: number): { from: string; to: string; label: string } {
+// D1 — offset-aware date range: offset=0 → current period, offset=1 → previous, etc.
+function getDateRange(months: number, offset: number): { from: string; to: string; label: string } {
   const now = new Date();
-  const to = new Date(now.getFullYear(), now.getMonth() + 1, 0); // end of current month
-  const from = new Date(now.getFullYear(), now.getMonth() - months + 1, 1); // start of range
-  const toStr = to.toISOString().slice(0, 10);
-  const fromStr = from.toISOString().slice(0, 10);
+  let fromDate: Date, toDate: Date, label: string;
 
   if (months === 1) {
-    return { from: fromStr, to: toStr, label: now.toLocaleDateString("fr-FR", { month: "long", year: "numeric" }) };
+    // Navigate month by month
+    const d = new Date(now.getFullYear(), now.getMonth() - offset, 1);
+    fromDate = d;
+    toDate = new Date(d.getFullYear(), d.getMonth() + 1, 0);
+    label = d.toLocaleDateString("fr-FR", { month: "long", year: "numeric" });
+  } else if (months === 3) {
+    // Navigate quarter by quarter (T1=Jan-Mar, T2=Apr-Jun, T3=Jul-Sep, T4=Oct-Dec)
+    const currentQSeq = now.getFullYear() * 4 + Math.floor(now.getMonth() / 3);
+    const targetQSeq = currentQSeq - offset;
+    const targetYear = Math.floor(targetQSeq / 4);
+    const targetQ = targetQSeq - targetYear * 4; // 0–3
+    const targetMonth = targetQ * 3;
+    fromDate = new Date(targetYear, targetMonth, 1);
+    toDate = new Date(targetYear, targetMonth + 3, 0);
+    label = `T${targetQ + 1} ${targetYear}`;
+  } else if (months === 6) {
+    // Navigate half-year by half-year (S1=Jan-Jun, S2=Jul-Dec)
+    const currentSSeq = now.getFullYear() * 2 + (now.getMonth() < 6 ? 0 : 1);
+    const targetSSeq = currentSSeq - offset;
+    const targetYear = Math.floor(targetSSeq / 2);
+    const targetS = targetSSeq - targetYear * 2; // 0 or 1
+    const targetMonth = targetS * 6;
+    fromDate = new Date(targetYear, targetMonth, 1);
+    toDate = new Date(targetYear, targetMonth + 6, 0);
+    label = `S${targetS + 1} ${targetYear}`;
+  } else {
+    // Navigate year by year
+    const targetYear = now.getFullYear() - offset;
+    fromDate = new Date(targetYear, 0, 1);
+    toDate = new Date(targetYear, 11, 31);
+    label = `${targetYear}`;
   }
-  const fromLabel = from.toLocaleDateString("fr-FR", { month: "short", year: "numeric" });
-  const toLabel = now.toLocaleDateString("fr-FR", { month: "short", year: "numeric" });
-  return { from: fromStr, to: toStr, label: `${fromLabel} — ${toLabel}` };
+
+  return {
+    from: fromDate.toISOString().slice(0, 10),
+    to: toDate.toISOString().slice(0, 10),
+    label,
+  };
 }
 
 export default function DashboardPage() {
   const [periodIdx, setPeriodIdx] = useState(0);
+  const [offset, setOffset] = useState(0);
   const [expandedCat, setExpandedCat] = useState<string | null>(null);
   const [txs, setTxs] = useState<Transaction[]>([]);
   const [cats, setCats] = useState<Map<string, Category>>(new Map());
   const [loading, setLoading] = useState(true);
-  const [aiContent, setAiContent] = useState<string | null>(null);
-  const [aiLoading, setAiLoading] = useState(false);
-  const [aiDate, setAiDate] = useState<string | null>(null);
-  const [cacheChecked, setCacheChecked] = useState(false);
-  const autoTriggeredRef = useRef<string | null>(null);
 
-  const range = useMemo(() => getDateRange(PERIODS[periodIdx].months), [periodIdx]);
+  const range = useMemo(() => getDateRange(PERIODS[periodIdx].months, offset), [periodIdx, offset]);
 
-  // Load cached analysis when period changes
-  const loadCachedAnalysis = useCallback(async (from: string, to: string) => {
-    setCacheChecked(false);
-    try {
-      const res = await fetch(`/api/analyze?tab=dashboard&from=${from}&to=${to}`);
-      if (res.ok) {
-        const data = await res.json();
-        if (data.cached && data.content) {
-          setAiContent(data.content);
-          setAiDate(data.created_at);
-        }
-      }
-    } catch { /* silent */ }
-    setCacheChecked(true);
-  }, []);
+  // Reset offset when period type changes
+  const handlePeriodChange = (idx: number) => {
+    setPeriodIdx(idx);
+    setOffset(0);
+  };
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -97,42 +114,7 @@ export default function DashboardPage() {
 
   useEffect(() => {
     loadData();
-    setAiContent(null);
-    setAiDate(null);
-    setCacheChecked(false);
-    loadCachedAnalysis(range.from, range.to);
-  }, [loadData, loadCachedAnalysis, range]);
-
-  const refreshAI = useCallback(async (force = false) => {
-    setAiLoading(true);
-    try {
-      const res = await fetch("/api/analyze", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tab: "dashboard", from: range.from, to: range.to, force }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setAiContent(`<p>${data.message || data.error || "Erreur API"}</p>`);
-        setAiDate(null);
-      } else {
-        setAiContent(data.content || "<p>Aucun contenu généré.</p>");
-        setAiDate(data.created_at || null);
-      }
-    } catch {
-      setAiContent("<p>Erreur de connexion à l'API.</p>");
-    }
-    setAiLoading(false);
-  }, [range]);
-
-  // Auto-trigger analysis when no cached analysis exists and transactions are available
-  const rangeKey = `${range.from}_${range.to}`;
-  useEffect(() => {
-    if (!loading && cacheChecked && !aiContent && !aiLoading && txs.length > 0 && autoTriggeredRef.current !== rangeKey) {
-      autoTriggeredRef.current = rangeKey;
-      refreshAI(false);
-    }
-  }, [loading, cacheChecked, aiContent, aiLoading, txs.length, rangeKey, refreshAI]);
+  }, [loadData]);
 
   // Compute stats
   let income = 0, expense = 0, debt = 0;
@@ -182,21 +164,48 @@ export default function DashboardPage() {
           <div style={{ fontSize: 12, color: "#86868B", marginBottom: 4 }}>
             {new Date().toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}
           </div>
-          <h1 style={{ fontSize: 32, fontWeight: 600, color: "#1D1D1F", letterSpacing: "-0.5px", lineHeight: 1 }}>
-            {range.label}
-          </h1>
+          {/* D1 — Period title + nav arrows */}
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <button
+              onClick={() => setOffset((o) => o + 1)}
+              title="Période précédente"
+              style={{
+                background: "none", border: "none", cursor: "pointer",
+                fontSize: 18, color: "#86868B", padding: "0 4px", lineHeight: 1,
+              }}
+            >
+              ◀
+            </button>
+            <h1 style={{ fontSize: 32, fontWeight: 600, color: "#1D1D1F", letterSpacing: "-0.5px", lineHeight: 1, margin: 0 }}>
+              {range.label}
+            </h1>
+            <button
+              onClick={() => setOffset((o) => Math.max(0, o - 1))}
+              title="Période suivante"
+              disabled={offset === 0}
+              style={{
+                background: "none", border: "none",
+                cursor: offset === 0 ? "default" : "pointer",
+                fontSize: 18,
+                color: offset === 0 ? "#AEAEB2" : "#86868B",
+                padding: "0 4px", lineHeight: 1,
+              }}
+            >
+              ▶
+            </button>
+          </div>
         </div>
         <div className="flex items-center gap-3">
           <div className="pill-group">
             {PERIODS.map((p, i) => (
-              <button key={p.label} onClick={() => setPeriodIdx(i)} className={`pill-item ${periodIdx === i ? "active" : ""}`}>{p.label}</button>
+              <button key={p.label} onClick={() => handlePeriodChange(i)} className={`pill-item ${periodIdx === i ? "active" : ""}`}>{p.label}</button>
             ))}
           </div>
         </div>
       </div>
 
       {/* Hero cards */}
-      <div className="rounded-apple-lg mb-6" style={{ background: "#F5F5F7", display: "grid", gridTemplateColumns: "1fr 1px 1fr 1px 1fr" }}>
+      <div className="rounded-apple-lg mb-4" style={{ background: "#F5F5F7", display: "grid", gridTemplateColumns: "1fr 1px 1fr 1px 1fr" }}>
         {[
           { label: months > 1 ? "Revenus (total)" : "Revenus", value: income, color: "#34C759", sub: months > 1 ? `${months} mois · moy. ${fek(income / months)}/mois` : "Salaires + allocations" },
           { label: months > 1 ? "Dépensé (total)" : "Dépensé", value: expense, color: "#FF3B30", sub: months > 1 ? `moy. ${fek(expense / months)}/mois` : "Hors crédits" },
@@ -213,18 +222,8 @@ export default function DashboardPage() {
         ))}
       </div>
 
-      {/* AI Panel */}
-      <div className="mb-6">
-        <AIPanel
-          title="Analyse IA — Dashboard"
-          content={aiContent || (aiLoading ? `<p style="color:#AEAEB2">Analyse en cours de génération\u2026</p>` : `<p style="color:#AEAEB2">Cliquez sur "Générer" pour lancer une analyse complète de la période.</p>`)}
-          timestamp={aiDate ? new Date(aiDate + "Z").toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" }) : ""}
-          onRefresh={() => refreshAI(false)}
-          onForceRefresh={() => refreshAI(true)}
-          refreshLoading={aiLoading}
-          hasCachedAnalysis={!!aiDate}
-        />
-      </div>
+      {/* D4 — InsightsBanner between hero cards and categories */}
+      <InsightsBanner tab="dashboard" from={range.from} to={range.to} />
 
       {/* Main grid */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 280px", gap: 16 }}>

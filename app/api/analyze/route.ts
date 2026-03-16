@@ -343,6 +343,66 @@ Explain each scenario's implications. When does the user break even? When do the
 Base all numbers on actual averages from the transaction data.`;
 }
 
+// ─── Insights prompts (JSON, no HTML, no extended thinking) ──────────────────
+
+function buildInsightsPrompt(ctx: ReturnType<typeof buildFullContext>, tab: string): string {
+  const header = `FINANCIAL DATA
+period: ${ctx.from} → ${ctx.to}
+income: ${(ctx.income / ctx.monthsDiff).toFixed(0)}€/month
+expenses: ${(ctx.expense / ctx.monthsDiff).toFixed(0)}€/month
+savings: ${(ctx.savings / ctx.monthsDiff).toFixed(0)}€/month
+accounts:
+${ctx.accountsList}
+budget_comparison:
+${ctx.budgetComparison}
+transactions_count: ${ctx.txCount}
+transactions: ${JSON.stringify(ctx.txJson.slice(0, 150), null, 0)}`;
+
+  const tabInstructions: Record<string, string> = {
+    "insights-dashboard": `Focus on:
+- Reste à vivre (what's left after income minus all expenses and credits)
+- Budget overruns: categories significantly over budget (cite exact amounts)
+- Good trends or positive behaviors observed
+- Unclassified transactions ("Divers"/"Non classé"): count and total amount`,
+    "insights-transactions": `Focus on:
+- Unclassified transactions (category "Divers" or "Non classé"): count and total amount
+- New merchants appearing for the first time this period
+- Transactions with unusually high amounts for that merchant or category`,
+    "insights-cashflow": `Focus on:
+- Monthly structural deficit or surplus (income vs total outflows including transfers)
+- 6-month projection based on current trends
+- Key upcoming financial dates (e.g., loan end dates, seasonal expenses)`,
+    "insights-banks": `Focus on:
+- Dormant accounts (little or no activity this period)
+- Total amount injected into real estate / immo account this period
+- Children savings imbalance between their respective accounts`,
+  };
+
+  const instructions = tabInstructions[tab] || tabInstructions["insights-dashboard"];
+
+  return `${header}
+
+TASK: Generate 2–4 concise financial insights for the "${tab.replace("insights-", "")}" view.
+
+${instructions}
+
+CRITICAL: Respond ONLY with a raw JSON array. No text before, no text after, no markdown, no backticks, no code fences.
+Format exactly:
+[{"type":"alert","title":"...","body":"...","metric":"..."},{"type":"positive","title":"...","body":"...","metric":null}]
+
+Rules:
+- type must be exactly one of: "alert" | "warning" | "positive" | "info"
+  - "alert" = urgent problem (shown in red)
+  - "warning" = thing to watch (shown in orange)
+  - "positive" = good news (shown in green)
+  - "info" = neutral information (shown in blue)
+- title: max 50 chars, punchy and specific
+- body: 1–2 sentences, cite actual numbers from data, use <b>amount</b> tags for key figures
+- metric: optional short badge like "+340 €", "-12%", "3 txns" — or null
+- Generate exactly 2–4 insights total
+- Write in French`;
+}
+
 // ─── Route GET — cached analysis ─────────────────────────────────────────────
 
 export async function GET(req: NextRequest) {
@@ -407,8 +467,53 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Build context and select prompt
+    // Build context
     const ctx = buildFullContext(periodFrom, periodTo);
+    const client = new Anthropic({ apiKey });
+
+    // ── Insights tabs: fast, no thinking, JSON output ─────────────────────────
+    if (tab.startsWith("insights-")) {
+      const insightsPrompt = buildInsightsPrompt(ctx, tab);
+
+      const response = await client.messages.create({
+        model: "claude-sonnet-4-6",
+        max_tokens: 2000,
+        system: "You are a financial analysis AI. You always respond with a raw JSON array only — no markdown, no code fences, no prose whatsoever.",
+        messages: [{ role: "user", content: insightsPrompt }],
+      });
+
+      let jsonContent = ((response.content[0] as TextBlock).text || "").trim();
+      // Strip any accidental code fences
+      jsonContent = jsonContent
+        .replace(/^```json\s*/i, "")
+        .replace(/^```\s*/, "")
+        .replace(/```\s*$/, "")
+        .trim();
+
+      // Validate JSON — wrap in fallback insight if broken
+      try {
+        JSON.parse(jsonContent);
+      } catch {
+        jsonContent = JSON.stringify([{
+          type: "info",
+          title: "Analyse disponible",
+          body: jsonContent.slice(0, 300),
+          metric: null,
+        }]);
+      }
+
+      db.prepare(`
+        INSERT INTO analyses (tab, period_from, period_to, content, created_at)
+        VALUES (?, ?, ?, ?, datetime('now'))
+        ON CONFLICT(tab, period_from, period_to) DO UPDATE SET
+          content = excluded.content,
+          created_at = excluded.created_at
+      `).run(tab, periodFrom, periodTo, jsonContent);
+
+      return NextResponse.json({ content: jsonContent, cached: false });
+    }
+
+    // ── Full analysis tabs: extended thinking, HTML output ────────────────────
 
     const promptMap: Record<string, (ctx: ReturnType<typeof buildFullContext>) => string> = {
       dashboard: buildDashboardPrompt,
@@ -458,8 +563,6 @@ export async function POST(req: NextRequest) {
     const thinkingBudget = isLightPrompt ? 8000 : 16000;
     const maxTokens = isLightPrompt ? 16000 : 32000;
 
-    const client = new Anthropic({ apiKey });
-
     const stream = client.messages.stream({
       model: "claude-sonnet-4-6",
       max_tokens: maxTokens,
@@ -473,10 +576,17 @@ export async function POST(req: NextRequest) {
 
     const message = await stream.finalMessage();
 
-    const html = (message.content as ContentBlock[])
+    let html = (message.content as ContentBlock[])
       .filter((b): b is TextBlock => b.type === "text")
       .map(b => b.text)
       .join("")
+      .trim();
+
+    // D2: Strip code fences the LLM may accidentally return
+    html = html
+      .replace(/^```html\s*/i, "")
+      .replace(/^```\s*/, "")
+      .replace(/```\s*$/, "")
       .trim();
 
     // Store in DB (upsert)

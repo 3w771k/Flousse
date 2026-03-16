@@ -128,6 +128,24 @@ function initSchema(db: Database.Database) {
   db.prepare("INSERT OR IGNORE INTO categories (id, name, type, icon, parent_id, budget, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)")
     .run("retraits", "Retraits esp\u00e8ces", "expense", "\ud83d\udcb5", "finances-admin", null, 114);
 
+  // Seed credit metadata for existing DBs (INSERT OR IGNORE is safe)
+  const creditSettings = [
+    { key: "credit_hb-credit1_mensualite", value: "906.92" },
+    { key: "credit_hb-credit1_taux", value: "1.72" },
+    { key: "credit_hb-credit1_fin", value: "2037-11" },
+    { key: "credit_hb-credit1_montant_initial", value: "181000" },
+    { key: "credit_hb-credit2_mensualite", value: "562.39" },
+    { key: "credit_hb-credit2_taux", value: "1.40" },
+    { key: "credit_hb-credit2_fin", value: "2039-01" },
+    { key: "credit_hb-credit2_montant_initial", value: "113700" },
+    { key: "credit_hb-pretperso_mensualite", value: "184.52" },
+    { key: "credit_hb-pretperso_taux", value: "5.08" },
+    { key: "credit_hb-pretperso_fin", value: "2028-07" },
+    { key: "credit_hb-pretperso_montant_initial", value: "8000" },
+  ];
+  const insertCreditSetting = db.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)");
+  for (const s of creditSettings) insertCreditSetting.run(s.key, s.value);
+
   // Seed if empty
   const count = (db.prepare("SELECT COUNT(*) as n FROM categories").get() as { n: number }).n;
   if (count === 0) seedDb(db);
@@ -246,11 +264,24 @@ function seedDb(db: Database.Database) {
     { pattern: "ADOBE CREATIVE", category_id: "abonnements" },
   ];
 
-  // Valeurs immobilières par défaut (éditables dans Paramètres)
+  // Valeurs immobilières et crédits metadata par défaut (éditables dans Paramètres)
   const settings = [
     { key: "immo_sci", value: "300000" },
     { key: "immo_lille40", value: "200000" },
     { key: "immo_lille19", value: "100000" },
+    // Crédits metadata
+    { key: "credit_hb-credit1_mensualite", value: "906.92" },
+    { key: "credit_hb-credit1_taux", value: "1.72" },
+    { key: "credit_hb-credit1_fin", value: "2037-11" },
+    { key: "credit_hb-credit1_montant_initial", value: "181000" },
+    { key: "credit_hb-credit2_mensualite", value: "562.39" },
+    { key: "credit_hb-credit2_taux", value: "1.40" },
+    { key: "credit_hb-credit2_fin", value: "2039-01" },
+    { key: "credit_hb-credit2_montant_initial", value: "113700" },
+    { key: "credit_hb-pretperso_mensualite", value: "184.52" },
+    { key: "credit_hb-pretperso_taux", value: "5.08" },
+    { key: "credit_hb-pretperso_fin", value: "2028-07" },
+    { key: "credit_hb-pretperso_montant_initial", value: "8000" },
   ];
 
   const insertCat = db.prepare(`INSERT OR IGNORE INTO categories (id, name, type, icon, parent_id, budget, sort_order) VALUES (@id, @name, @type, @icon, @parent_id, @budget, @sort_order)`);

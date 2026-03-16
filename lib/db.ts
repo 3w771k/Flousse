@@ -107,9 +107,21 @@ function initSchema(db: Database.Database) {
   `);
 
   // Migrations for existing databases
-  const cols = db.prepare("PRAGMA table_info(transactions)").all() as { name: string }[];
-  if (!cols.some((c) => c.name === "real_date")) {
+  const txCols = db.prepare("PRAGMA table_info(transactions)").all() as { name: string }[];
+  if (!txCols.some((c) => c.name === "real_date")) {
     db.exec("ALTER TABLE transactions ADD COLUMN real_date TEXT");
+  }
+
+  const accCols = db.prepare("PRAGMA table_info(accounts)").all() as { name: string }[];
+  if (!accCols.some((c) => c.name === "seed_balance")) {
+    db.exec("ALTER TABLE accounts ADD COLUMN seed_balance REAL NOT NULL DEFAULT 0");
+    // Infer seed_balance = actual balance - SUM(transactions) for each account
+    db.exec(`
+      UPDATE accounts SET seed_balance = (
+        SELECT balance - COALESCE(SUM(t.amount), 0)
+        FROM transactions t WHERE t.account_id = accounts.id
+      )
+    `);
   }
 
   // Seed if empty

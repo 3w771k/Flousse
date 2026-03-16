@@ -305,7 +305,8 @@ export async function POST(req: NextRequest) {
 
     const client = new Anthropic({ apiKey });
 
-    const message = await client.messages.create({
+    // Use streaming to avoid 10-min SDK timeout on long thinking requests
+    const stream = client.messages.stream({
       model: "claude-sonnet-4-6-20250514",
       max_tokens: 32000,
       thinking: {
@@ -315,6 +316,8 @@ export async function POST(req: NextRequest) {
       system: SYSTEM_PROMPT,
       messages,
     });
+
+    const message = await stream.finalMessage();
 
     // Extract only text blocks (skip thinking blocks)
     const html = (message.content as ContentBlock[])

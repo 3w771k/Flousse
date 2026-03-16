@@ -37,6 +37,8 @@ export default function ImportPage() {
   const [result, setResult] = useState<ImportResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
+  const [elapsed, setElapsed] = useState(0);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -48,17 +50,29 @@ export default function ImportPage() {
     setStep(2);
   };
 
+  const stopTimer = () => {
+    if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
+  };
+
   const handleImport = async () => {
     if (!file || !account) return;
     setStep(3);
     setError(null);
+    setElapsed(0);
+    timerRef.current = setInterval(() => setElapsed((e) => e + 1), 1000);
 
     const formData = new FormData();
     formData.append("file", file);
     formData.append("accountId", account);
 
     try {
-      const res = await fetch("/api/import", { method: "POST", body: formData });
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 180_000); // 3 min max
+
+      const res = await fetch("/api/import", { method: "POST", body: formData, signal: controller.signal });
+      clearTimeout(timeout);
+      stopTimer();
+
       const data = await res.json();
       if (!res.ok) {
         setError(data.error || "Erreur lors de l'import");
@@ -67,8 +81,13 @@ export default function ImportPage() {
       }
       setResult(data);
       setStep(4);
-    } catch {
-      setError("Erreur réseau");
+    } catch (err) {
+      stopTimer();
+      if (err instanceof DOMException && err.name === "AbortError") {
+        setError("L'analyse a pris trop de temps (>3 min). Essayez avec un fichier plus petit ou vérifiez votre clé API.");
+      } else {
+        setError("Erreur réseau — vérifiez que le serveur est démarré.");
+      }
       setStep(2);
     }
   };
@@ -192,19 +211,19 @@ export default function ImportPage() {
 
       {/* Step 3 */}
       {step === 3 && (
-        <div className="rounded-apple" style={{ background: "#F5F5F7", padding: 24, maxWidth: 480 }}>
-          <div style={{ fontSize: 15, fontWeight: 500, color: "#1D1D1F", textAlign: "center", marginBottom: 24 }}>Analyse en cours…</div>
-          {["Parsing du fichier", "Application des règles", "Classification Claude", "Vérification doublons"].map((phase, i) => (
-            <div key={i} style={{ marginBottom: 16 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-                <span style={{ fontSize: 12, color: "#86868B" }}>{phase}</span>
-                <span style={{ fontSize: 11, color: "#AEAEB2" }}>…</span>
-              </div>
-              <div style={{ height: 3, background: "rgba(0,0,0,0.06)", borderRadius: 2 }}>
-                <div style={{ height: 3, borderRadius: 2, width: "60%", background: "#007AFF", transition: "width 300ms ease", animation: "pulse 1s infinite" }} />
-              </div>
-            </div>
-          ))}
+        <div className="rounded-apple" style={{ background: "#F5F5F7", padding: "40px 24px", maxWidth: 480, textAlign: "center" }}>
+          <div style={{ width: 40, height: 40, border: "3px solid rgba(0,122,255,0.15)", borderTopColor: "#007AFF", borderRadius: "50%", margin: "0 auto 20px", animation: "spin 0.8s linear infinite" }} />
+          <div style={{ fontSize: 15, fontWeight: 500, color: "#1D1D1F", marginBottom: 8 }}>Analyse en cours…</div>
+          <div style={{ fontSize: 13, color: "#86868B", marginBottom: 4 }}>
+            Parsing, règles, classification IA
+          </div>
+          <div style={{ fontSize: 24, fontWeight: 300, color: "#007AFF", marginTop: 16, fontVariantNumeric: "tabular-nums" }}>
+            {Math.floor(elapsed / 60)}:{String(elapsed % 60).padStart(2, "0")}
+          </div>
+          <div style={{ fontSize: 11, color: "#AEAEB2", marginTop: 8 }}>
+            {elapsed < 10 ? "Parsing du fichier…" : elapsed < 30 ? "Classification IA des transactions…" : "Gros fichier — l'IA travaille, patience…"}
+          </div>
+          <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
         </div>
       )}
 

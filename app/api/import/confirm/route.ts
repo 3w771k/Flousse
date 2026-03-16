@@ -34,6 +34,14 @@ export async function POST(req: NextRequest) {
         const result = insert.run(t.id, body.accountId, t.date, t.label, t.amount, t.categoryId, t.confidence, t.source);
         if (result.changes > 0) inserted++;
       }
+
+      // Recalculate account balance from all its transactions
+      // Balance = seed balance (from accounts table initial value) gets replaced by
+      // sum of all transactions for this account
+      const sumRow = db.prepare(
+        "SELECT COALESCE(SUM(amount), 0) as total FROM transactions WHERE account_id = ?"
+      ).get(body.accountId) as { total: number };
+      db.prepare("UPDATE accounts SET balance = ? WHERE id = ?").run(sumRow.total, body.accountId);
     })();
 
     return NextResponse.json({ ok: true, inserted });

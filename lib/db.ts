@@ -124,6 +124,10 @@ function initSchema(db: Database.Database) {
     `);
   }
 
+  // Add new categories to existing DBs (INSERT OR IGNORE is safe)
+  db.prepare("INSERT OR IGNORE INTO categories (id, name, type, icon, parent_id, budget, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)")
+    .run("retraits", "Retraits esp\u00e8ces", "expense", "\ud83d\udcb5", "finances-admin", null, 114);
+
   // Seed if empty
   const count = (db.prepare("SELECT COUNT(*) as n FROM categories").get() as { n: number }).n;
   if (count === 0) seedDb(db);
@@ -190,6 +194,7 @@ function seedDb(db: Database.Database) {
     { id: "impots", name: "Impôts & taxes", type: "expense", icon: "🏛️", parent_id: "finances-admin", budget: null, sort_order: 111 },
     { id: "frais-bancaires", name: "Frais bancaires", type: "expense", icon: "🏧", parent_id: "finances-admin", budget: 20, sort_order: 112 },
     { id: "comptable-avocat", name: "Comptable & juridique", type: "expense", icon: "⚖️", parent_id: "finances-admin", budget: null, sort_order: 113 },
+    { id: "retraits", name: "Retraits espèces", type: "expense", icon: "💵", parent_id: "finances-admin", budget: null, sort_order: 114 },
     // DIVERS
     { id: "divers", name: "Divers / Non classé", type: "expense", icon: "❓", parent_id: null, budget: null, sort_order: 999 },
   ];

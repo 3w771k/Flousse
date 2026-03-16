@@ -200,8 +200,8 @@ const BUILTIN_RULES: BuiltinRule[] = [
   { pattern: "ENGIE", categoryId: "logement" },
 
   // ── Divers (DAB withdrawals) ──
-  { pattern: "RETRAIT DAB", categoryId: "divers" },
-  { pattern: "RET DAB", categoryId: "divers" },
+  { pattern: "RETRAIT DAB", categoryId: "retraits" },
+  { pattern: "RET DAB", categoryId: "retraits" },
 
   // ── Revenus (generic, after specific salary/allocation rules) ──
   { pattern: "SALAIRE", categoryId: "salaire" },
@@ -363,7 +363,7 @@ async function classifyBatch(
     const client = new Anthropic({ apiKey });
 
     const message = await client.messages.create({
-      model: "claude-haiku-4-5",
+      model: "claude-sonnet-4-6",
       max_tokens: 4096,
       messages: [
         {

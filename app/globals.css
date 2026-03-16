@@ -160,3 +160,12 @@ body {
   color: #1D1D1F;
   font-weight: 600;
 }
+
+/* Sparkle pulse animation for AI loading */
+@keyframes sparkle-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.85); }
+}
+.sparkle-pulse {
+  animation: sparkle-pulse 1.5s ease-in-out infinite;
+}

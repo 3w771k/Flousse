@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 const CARDS = [
   { id: "synthese", title: "Synthèse du mois" },
@@ -9,10 +9,10 @@ const CARDS = [
 ];
 
 const DEFAULT_CONTENT: Record<string, string> = {
-  synthese: `<p>Cliquez sur <em>Générer</em> pour obtenir une synthèse IA de vos finances du mois.</p>`,
-  anomalies: `<p>Cliquez sur <em>Générer</em> pour détecter les anomalies dans vos transactions.</p>`,
-  optimisations: `<p>Cliquez sur <em>Générer</em> pour recevoir des recommandations d'optimisation.</p>`,
-  projections: `<p>Cliquez sur <em>Générer</em> pour voir les projections sur 6 mois.</p>`,
+  synthese: `<p style="color:#AEAEB2">Cliquez sur <em>Générer</em> pour obtenir une synthèse IA de vos finances.</p>`,
+  anomalies: `<p style="color:#AEAEB2">Cliquez sur <em>Générer</em> pour détecter les anomalies dans vos transactions.</p>`,
+  optimisations: `<p style="color:#AEAEB2">Cliquez sur <em>Générer</em> pour recevoir des recommandations d'optimisation.</p>`,
+  projections: `<p style="color:#AEAEB2">Cliquez sur <em>Générer</em> pour voir les projections sur 6 mois.</p>`,
 };
 
 const SparkleIcon = () => (
@@ -21,27 +21,56 @@ const SparkleIcon = () => (
   </svg>
 );
 
+function getRange() {
+  const now = new Date();
+  const to = now.toISOString().slice(0, 10);
+  const from = new Date(now.getFullYear(), now.getMonth() - 3, 1).toISOString().slice(0, 10);
+  return { from, to };
+}
+
 export default function AnalysisPage() {
   const [contents, setContents] = useState<Record<string, string>>({});
   const [loadingId, setLoadingId] = useState<string | null>(null);
   const [timestamps, setTimestamps] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
 
-  const generate = async (id: string) => {
+  const { from, to } = getRange();
+
+  // Load cached analyses on mount
+  useEffect(() => {
+    const { from, to } = getRange();
+    for (const card of CARDS) {
+      const tab = `analysis-${card.id}`;
+      fetch(`/api/analyze?tab=${tab}&from=${from}&to=${to}`)
+        .then((r) => r.json())
+        .then((d) => {
+          if (d.cached && d.content) {
+            setContents((prev) => ({ ...prev, [card.id]: d.content }));
+            setTimestamps((prev) => ({
+              ...prev,
+              [card.id]: new Date(d.created_at + "Z").toLocaleDateString("fr-FR", { day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" }),
+            }));
+          }
+        })
+        .catch(() => {});
+    }
+  }, []);
+
+  const generate = async (id: string, force = false) => {
     setLoadingId(id);
     setError(null);
     try {
       const res = await fetch("/api/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ type: id }),
+        body: JSON.stringify({ tab: `analysis-${id}`, from, to, force }),
       });
       const data = await res.json();
       if (!res.ok) {
         if (data.error === "no_api_key") {
-          setError("Clé API Claude non configurée. Allez dans Paramètres \u2192 Clé API Claude.");
+          setError("Clé API Claude non configurée. Allez dans Paramètres → Clé API Claude.");
         } else if (data.error === "api_key_invalid") {
-          setError("Clé API invalide. Vérifiez votre clé dans Paramètres \u2192 Clé API Claude.");
+          setError("Clé API invalide. Vérifiez votre clé dans Paramètres → Clé API Claude.");
         } else if (data.error === "billing") {
           setError("Crédit API insuffisant. Rechargez votre compte Anthropic.");
         } else {
@@ -50,7 +79,12 @@ export default function AnalysisPage() {
         return;
       }
       setContents((prev) => ({ ...prev, [id]: data.content || "Erreur de génération" }));
-      setTimestamps((prev) => ({ ...prev, [id]: "maintenant" }));
+      setTimestamps((prev) => ({
+        ...prev,
+        [id]: data.created_at
+          ? new Date(data.created_at + "Z").toLocaleDateString("fr-FR", { day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" })
+          : "maintenant",
+      }));
     } catch {
       setError("Erreur de connexion au serveur");
     } finally {
@@ -81,7 +115,7 @@ export default function AnalysisPage() {
           disabled={loadingId !== null}
           style={{ padding: "8px 18px", borderRadius: 10, border: "none", background: "#007AFF", color: "white", fontSize: 13, fontWeight: 500, cursor: loadingId ? "default" : "pointer", opacity: loadingId ? 0.6 : 1 }}
         >
-          {loadingId ? "Génération\u2026" : "Tout générer"}
+          {loadingId ? "Génération\u2026" : "Tout analyser"}
         </button>
       </div>
 
@@ -99,20 +133,31 @@ export default function AnalysisPage() {
                 <SparkleIcon />
                 <span style={{ fontSize: 14, fontWeight: 500, color: "#1D1D1F" }}>{card.title}</span>
               </div>
-              <button
-                onClick={() => generate(card.id)}
-                disabled={loadingId !== null}
-                style={{ fontSize: 11, color: loadingId === card.id ? "#AEAEB2" : "#007AFF", background: "none", border: "none", cursor: loadingId ? "default" : "pointer" }}
-              >
-                {loadingId === card.id ? "\u2026" : "Générer"}
-              </button>
+              <div style={{ display: "flex", gap: 8 }}>
+                {timestamps[card.id] && (
+                  <button
+                    onClick={() => generate(card.id, true)}
+                    disabled={loadingId !== null}
+                    style={{ fontSize: 11, color: "#AEAEB2", background: "none", border: "none", cursor: loadingId ? "default" : "pointer" }}
+                  >
+                    Regénérer
+                  </button>
+                )}
+                <button
+                  onClick={() => generate(card.id)}
+                  disabled={loadingId !== null}
+                  style={{ fontSize: 11, color: loadingId === card.id ? "#AEAEB2" : "#007AFF", background: "none", border: "none", cursor: loadingId ? "default" : "pointer" }}
+                >
+                  {loadingId === card.id ? "\u2026" : (timestamps[card.id] ? "" : "Générer")}
+                </button>
+              </div>
             </div>
             {timestamps[card.id] && (
-              <div style={{ fontSize: 11, color: "#AEAEB2", marginBottom: 10 }}>Généré {timestamps[card.id]}</div>
+              <div style={{ fontSize: 11, color: "#AEAEB2", marginBottom: 10 }}>Généré le {timestamps[card.id]}</div>
             )}
             <div
               className="ai-content"
-              style={{ fontSize: 13, color: "#86868B", lineHeight: 1.6 }}
+              style={{ fontSize: 13, color: "#86868B", lineHeight: 1.6, maxHeight: 400, overflowY: "auto" }}
               dangerouslySetInnerHTML={{ __html: contents[card.id] || DEFAULT_CONTENT[card.id] }}
             />
           </div>

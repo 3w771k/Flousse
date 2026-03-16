@@ -17,8 +17,8 @@ export function getDb(): Database.Database {
 
 export function resetDb(): void {
   const db = getDb();
-  // Save API key
-  const apiKey = db.prepare("SELECT value FROM settings WHERE key = 'claude_api_key'").get() as { value: string } | undefined;
+  // Save API key and immo settings
+  const savedSettings = db.prepare("SELECT key, value FROM settings WHERE key IN ('claude_api_key', 'immo_sci', 'immo_lille40', 'immo_lille19')").all() as { key: string; value: string }[];
 
   // Clear all data and re-seed in one go (same connection, no close/reopen)
   db.pragma("foreign_keys = OFF");
@@ -28,15 +28,16 @@ export function resetDb(): void {
     db.prepare("DELETE FROM settings").run();
     db.prepare("DELETE FROM accounts").run();
     db.prepare("DELETE FROM categories").run();
+    db.prepare("DELETE FROM analyses").run();
   })();
   db.pragma("foreign_keys = ON");
 
   // Re-seed directly on this connection
   seedDb(db);
 
-  // Restore API key
-  if (apiKey?.value) {
-    db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('claude_api_key', ?)").run(apiKey.value);
+  // Restore saved settings
+  for (const s of savedSettings) {
+    db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)").run(s.key, s.value);
   }
 }
 
@@ -49,6 +50,7 @@ function initSchema(db: Database.Database) {
       icon TEXT NOT NULL DEFAULT '💳',
       type TEXT NOT NULL CHECK(type IN ('liquidites','epargne','credit','carte','bourse')),
       balance REAL NOT NULL DEFAULT 0,
+      seed_balance REAL NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
@@ -66,6 +68,7 @@ function initSchema(db: Database.Database) {
       id TEXT PRIMARY KEY,
       account_id TEXT NOT NULL REFERENCES accounts(id),
       date TEXT NOT NULL,
+      real_date TEXT,
       label TEXT NOT NULL,
       amount REAL NOT NULL,
       category_id TEXT NOT NULL REFERENCES categories(id),
@@ -103,13 +106,18 @@ function initSchema(db: Database.Database) {
     CREATE INDEX IF NOT EXISTS idx_analyses_tab_period ON analyses(tab, period_from, period_to);
   `);
 
+  // Migrations for existing databases
+  const cols = db.prepare("PRAGMA table_info(transactions)").all() as { name: string }[];
+  if (!cols.some((c) => c.name === "real_date")) {
+    db.exec("ALTER TABLE transactions ADD COLUMN real_date TEXT");
+  }
+
   // Seed if empty
   const count = (db.prepare("SELECT COUNT(*) as n FROM categories").get() as { n: number }).n;
   if (count === 0) seedDb(db);
 }
 
 function seedDb(db: Database.Database) {
-  // Import seed data inline (cannot import from mockData due to edge/node boundary)
   const categories = [
     // REVENUS
     { id: "revenus", name: "Revenus", type: "income", icon: "💰", parent_id: null, budget: null, sort_order: 1 },
@@ -122,7 +130,7 @@ function seedDb(db: Database.Database) {
     { id: "vir-joint", name: "→ Compte Joint", type: "transfer", icon: "🔄", parent_id: "transferts", budget: null, sort_order: 11 },
     { id: "vir-immo", name: "→ Compte Immo", type: "transfer", icon: "🔄", parent_id: "transferts", budget: null, sort_order: 12 },
     { id: "vir-interne", name: "Transfert interne", type: "transfer", icon: "🔄", parent_id: "transferts", budget: null, sort_order: 13 },
-    // CRÉDITS
+    // CREDITS
     { id: "credits", name: "Crédits", type: "dette", icon: "🏦", parent_id: null, budget: null, sort_order: 20 },
     { id: "credit-immo", name: "Crédit immobilier", type: "dette", icon: "🏦", parent_id: "credits", budget: null, sort_order: 21 },
     { id: "pret-perso", name: "Prêt personnel", type: "dette", icon: "🏦", parent_id: "credits", budget: null, sort_order: 22 },
@@ -137,7 +145,7 @@ function seedDb(db: Database.Database) {
     { id: "garde", name: "Garde d'enfants", type: "expense", icon: "👶", parent_id: "enfants", budget: 1200, sort_order: 41 },
     { id: "enfants-activites", name: "Activités & école", type: "expense", icon: "🎒", parent_id: "enfants", budget: 150, sort_order: 42 },
     { id: "enfants-shopping", name: "Shopping enfants", type: "expense", icon: "🧸", parent_id: "enfants", budget: 150, sort_order: 43 },
-    // BIEN-ÊTRE
+    // BIEN-ETRE
     { id: "bien-etre", name: "Bien-être & santé", type: "expense", icon: "🌿", parent_id: null, budget: 300, sort_order: 50 },
     { id: "sante", name: "Santé & pharmacie", type: "expense", icon: "🏥", parent_id: "bien-etre", budget: 150, sort_order: 51 },
     { id: "coiffeur", name: "Coiffeur & soins", type: "expense", icon: "✂️", parent_id: "bien-etre", budget: 100, sort_order: 52 },
@@ -174,55 +182,24 @@ function seedDb(db: Database.Database) {
     { id: "divers", name: "Divers / Non classé", type: "expense", icon: "❓", parent_id: null, budget: null, sort_order: 999 },
   ];
 
+  // Vrais soldes des comptes — seed_balance = balance au seed (pas encore de transactions)
   const accounts = [
-    { id: "hb-perso", name: "Compte Courant", bank: "Hello Bank", icon: "💳", type: "liquidites", balance: 1585 },
-    { id: "hb-immo", name: "Compte Immo", bank: "Hello Bank", icon: "🏠", type: "liquidites", balance: 454 },
+    { id: "hb-perso", name: "Compte Courant", bank: "Hello Bank", icon: "💳", type: "liquidites", balance: 1584.67 },
+    { id: "hb-immo", name: "Compte Immo", bank: "Hello Bank", icon: "🏠", type: "liquidites", balance: 453.64 },
     { id: "hb-adele", name: "Adèle", bank: "Hello Bank", icon: "👧", type: "liquidites", balance: 13100 },
     { id: "hb-gabrielle", name: "Gabrielle", bank: "Hello Bank", icon: "👶", type: "liquidites", balance: 5230 },
-    { id: "hb-cautions", name: "Cautions Immo", bank: "Hello Bank", icon: "🔒", type: "epargne", balance: 634 },
-    { id: "hb-impots", name: "Impôts", bank: "Hello Bank", icon: "📋", type: "epargne", balance: 1954 },
-    { id: "hb-livretA-adele", name: "Livret A Adèle", bank: "Hello Bank", icon: "🐷", type: "epargne", balance: 24682 },
-    { id: "hb-livretA-gabrielle", name: "Livret A Gabrielle", bank: "Hello Bank", icon: "🐷", type: "epargne", balance: 18170 },
-    { id: "hb-credit1", name: "Crédit Lille 40m²", bank: "Hello Bank", icon: "🏦", type: "credit", balance: -112945 },
-    { id: "hb-credit2", name: "Crédit Lille 19m²", bank: "Hello Bank", icon: "🏦", type: "credit", balance: -76552 },
-    { id: "hb-pretperso", name: "Prêt personnel", bank: "Hello Bank", icon: "🏦", type: "credit", balance: -4862 },
-    { id: "ccf-perso", name: "Compte Chèques", bank: "CCF", icon: "💳", type: "liquidites", balance: 1442 },
-    { id: "ccf-joint", name: "Compte Joint", bank: "CCF", icon: "👫", type: "liquidites", balance: 3804 },
-    { id: "ccf-ldds", name: "LDDS", bank: "CCF", icon: "📈", type: "epargne", balance: 208 },
-    { id: "ccf-pea", name: "PEA", bank: "CCF", icon: "📊", type: "bourse", balance: 1202 },
-    { id: "amex", name: "Amex Gold AF-KLM", bank: "Amex", icon: "💎", type: "carte", balance: -22 },
-  ];
-
-  const transactions = [
-    { id: "t1", account_id: "hb-perso", date: "2026-03-05", label: "VIREMENT SINEQUA SALAIRE MARS", amount: 4850, category_id: "salaire", confidence: 1.0, source: "rule" },
-    { id: "t2", account_id: "ccf-joint", date: "2026-03-06", label: "CAF DES HAUTS DE SEINE", amount: 310, category_id: "allocations", confidence: 1.0, source: "rule" },
-    { id: "t3", account_id: "hb-perso", date: "2026-03-08", label: "ECHEANCE PRET 61123486 CREDIT IMMO", amount: -906.92, category_id: "credit-immo", confidence: 1.0, source: "rule" },
-    { id: "t4", account_id: "hb-perso", date: "2026-03-08", label: "ECHEANCE PRET 60837505 CREDIT IMMO 2", amount: -562.39, category_id: "credit-immo", confidence: 1.0, source: "rule" },
-    { id: "t5", account_id: "hb-perso", date: "2026-03-08", label: "ECHEANCE PRET 62043046 PRET PERSO", amount: -184.52, category_id: "pret-perso", confidence: 1.0, source: "rule" },
-    { id: "t6", account_id: "hb-perso", date: "2026-03-07", label: "VIR SEPA COMPTE JOINT MARS", amount: -1200, category_id: "vir-joint", confidence: 1.0, source: "rule" },
-    { id: "t7", account_id: "ccf-joint", date: "2026-03-03", label: "CARTE 03/03 CARREFOUR MARKET NEUILLY", amount: -87.40, category_id: "courses", confidence: 1.0, source: "rule" },
-    { id: "t8", account_id: "ccf-joint", date: "2026-03-05", label: "CARTE 05/03 DELIVEROO PARIS", amount: -34.90, category_id: "livraison", confidence: 1.0, source: "rule" },
-    { id: "t9", account_id: "ccf-joint", date: "2026-03-06", label: "CARTE 06/03 FRANPRIX RUE AMPERE", amount: -52.20, category_id: "courses", confidence: 1.0, source: "rule" },
-    { id: "t10", account_id: "ccf-joint", date: "2026-03-08", label: "PRELEVEMENT LPCR GARDE ENFANTS FEV", amount: -1180, category_id: "garde", confidence: 1.0, source: "rule" },
-    { id: "t11", account_id: "ccf-joint", date: "2026-03-10", label: "CARTE 10/03 WAZI RESTAURANT PARIS 8", amount: -67.50, category_id: "resto", confidence: 1.0, source: "rule" },
-    { id: "t12", account_id: "ccf-joint", date: "2026-03-11", label: "CARTE 11/03 PICARD SURGELÉS NEUILLY", amount: -44.10, category_id: "courses", confidence: 1.0, source: "rule" },
-    { id: "t13", account_id: "ccf-joint", date: "2026-03-12", label: "CARTE 12/03 UBER EATS PARIS", amount: -28.50, category_id: "livraison", confidence: 1.0, source: "rule" },
-    { id: "t14", account_id: "ccf-joint", date: "2026-03-13", label: "CARTE 13/03 MON-MARCHE.FR", amount: -119.80, category_id: "courses", confidence: 1.0, source: "rule" },
-    { id: "t15", account_id: "hb-perso", date: "2026-03-10", label: "CARTE 10/03 SERVICE NAVIGO RATP", amount: -86.40, category_id: "transport-commun", confidence: 1.0, source: "rule" },
-    { id: "t16", account_id: "hb-perso", date: "2026-03-12", label: "CARTE 12/03 IZIVIA RECHARGE VE", amount: -24.60, category_id: "voiture", confidence: 1.0, source: "rule" },
-    { id: "t17", account_id: "hb-perso", date: "2026-03-01", label: "PRELEVEMENT BOUYGUES TELECOM", amount: -29.99, category_id: "telecom", confidence: 1.0, source: "rule" },
-    { id: "t18", account_id: "hb-perso", date: "2026-03-01", label: "PRELEVEMENT VERISURE SECURITE", amount: -49.90, category_id: "securite", confidence: 1.0, source: "rule" },
-    { id: "t19", account_id: "hb-perso", date: "2026-03-02", label: "PRELEVEMENT APPLE.COM/BILL", amount: -14.99, category_id: "abonnements", confidence: 1.0, source: "rule" },
-    { id: "t20", account_id: "hb-perso", date: "2026-03-02", label: "PRELEVEMENT AMERICAN EXPRESS", amount: -380, category_id: "amex-prlv", confidence: 1.0, source: "rule" },
-    { id: "t21", account_id: "hb-perso", date: "2026-03-11", label: "VIREMENT VACHERAND SYNDIC COPRO", amount: -280, category_id: "copro", confidence: 1.0, source: "rule" },
-    { id: "t22", account_id: "hb-perso", date: "2026-03-14", label: "CARTE 14/03 G7 TAXI PARIS", amount: -22.80, category_id: "taxi", confidence: 0.95, source: "rule" },
-    { id: "t23", account_id: "hb-perso", date: "2026-03-13", label: "CARTE 13/03 SAEMES PARKING TERNES", amount: -18.00, category_id: "voiture", confidence: 0.95, source: "rule" },
-    { id: "t24", account_id: "ccf-joint", date: "2026-03-14", label: "CARTE 14/03 SAS JADE PARIS 17", amount: -156.00, category_id: "divers", confidence: 0.3, source: "llm" },
-    { id: "t25", account_id: "hb-perso", date: "2026-03-14", label: "PRELEVEMENT LEETCHI MGP", amount: -25.00, category_id: "divers", confidence: 0.4, source: "llm" },
-    { id: "t26", account_id: "amex", date: "2026-03-04", label: "RESTAURANT BAAN LAO PARIS 8", amount: -89.00, category_id: "resto", confidence: 1.0, source: "rule" },
-    { id: "t27", account_id: "amex", date: "2026-03-07", label: "AMAZON PRIME", amount: -6.99, category_id: "abonnements", confidence: 1.0, source: "rule" },
-    { id: "t28", account_id: "amex", date: "2026-03-09", label: "ZARA HOME PARIS", amount: -124.00, category_id: "shopping", confidence: 1.0, source: "rule" },
-    { id: "t29", account_id: "amex", date: "2026-03-11", label: "ADOBE CREATIVE CLOUD", amount: -54.99, category_id: "abonnements", confidence: 1.0, source: "rule" },
+    { id: "hb-cautions", name: "Cautions Immo", bank: "Hello Bank", icon: "🔒", type: "epargne", balance: 634.14 },
+    { id: "hb-impots", name: "Impôts", bank: "Hello Bank", icon: "📋", type: "epargne", balance: 1953.98 },
+    { id: "hb-livretA-adele", name: "Livret A Adèle", bank: "Hello Bank", icon: "🐷", type: "epargne", balance: 24681.63 },
+    { id: "hb-livretA-gabrielle", name: "Livret A Gabrielle", bank: "Hello Bank", icon: "🐷", type: "epargne", balance: 18170.14 },
+    { id: "hb-credit1", name: "Crédit Lille 40m²", bank: "Hello Bank", icon: "🏦", type: "credit", balance: -112945.23 },
+    { id: "hb-credit2", name: "Crédit Lille 19m²", bank: "Hello Bank", icon: "🏦", type: "credit", balance: -76552.31 },
+    { id: "hb-pretperso", name: "Prêt personnel", bank: "Hello Bank", icon: "🏦", type: "credit", balance: -4862.49 },
+    { id: "ccf-perso", name: "Compte Chèques", bank: "CCF", icon: "💳", type: "liquidites", balance: 1441.91 },
+    { id: "ccf-joint", name: "Compte Joint", bank: "CCF", icon: "👫", type: "liquidites", balance: 3804.28 },
+    { id: "ccf-ldds", name: "LDDS", bank: "CCF", icon: "📈", type: "epargne", balance: 208.35 },
+    { id: "ccf-pea", name: "PEA", bank: "CCF", icon: "📊", type: "bourse", balance: 1202.47 },
+    { id: "amex", name: "Amex Gold AF-KLM", bank: "Amex", icon: "💎", type: "carte", balance: -22.51 },
   ];
 
   const rules = [
@@ -252,15 +229,22 @@ function seedDb(db: Database.Database) {
     { pattern: "ADOBE CREATIVE", category_id: "abonnements" },
   ];
 
+  // Valeurs immobilières par défaut (éditables dans Paramètres)
+  const settings = [
+    { key: "immo_sci", value: "300000" },
+    { key: "immo_lille40", value: "200000" },
+    { key: "immo_lille19", value: "100000" },
+  ];
+
   const insertCat = db.prepare(`INSERT OR IGNORE INTO categories (id, name, type, icon, parent_id, budget, sort_order) VALUES (@id, @name, @type, @icon, @parent_id, @budget, @sort_order)`);
-  const insertAcc = db.prepare(`INSERT OR IGNORE INTO accounts (id, name, bank, icon, type, balance) VALUES (@id, @name, @bank, @icon, @type, @balance)`);
-  const insertTx = db.prepare(`INSERT OR IGNORE INTO transactions (id, account_id, date, label, amount, category_id, confidence, source) VALUES (@id, @account_id, @date, @label, @amount, @category_id, @confidence, @source)`);
+  const insertAcc = db.prepare(`INSERT OR IGNORE INTO accounts (id, name, bank, icon, type, balance, seed_balance) VALUES (@id, @name, @bank, @icon, @type, @balance, @balance)`);
   const insertRule = db.prepare(`INSERT OR IGNORE INTO rules (pattern, category_id) VALUES (@pattern, @category_id)`);
+  const insertSetting = db.prepare(`INSERT OR IGNORE INTO settings (key, value) VALUES (@key, @value)`);
 
   db.transaction(() => {
     for (const c of categories) insertCat.run(c);
     for (const a of accounts) insertAcc.run(a);
-    for (const t of transactions) insertTx.run(t);
     for (const r of rules) insertRule.run(r);
+    for (const s of settings) insertSetting.run(s);
   })();
 }

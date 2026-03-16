@@ -1,6 +1,7 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useState, useEffect } from "react";
 
 const NAV = [
   {
@@ -103,7 +104,22 @@ function NavItem({ href, label, icon }: { href: string; label: string; icon: Rea
   );
 }
 
+function formatPatrimoine(n: number): string {
+  if (Math.abs(n) >= 1000000) return `${(n / 1000000).toFixed(1).replace(".", ",")} M€`;
+  if (Math.abs(n) >= 1000) return `${Math.round(n / 1000)} k€`;
+  return `${Math.round(n)} €`;
+}
+
 export default function Sidebar() {
+  const [patrimoine, setPatrimoine] = useState<{ patrimoineNet: number; totalImmo: number } | null>(null);
+
+  useEffect(() => {
+    fetch("/api/patrimoine")
+      .then((r) => r.json())
+      .then((data) => setPatrimoine(data))
+      .catch(() => {});
+  }, []);
+
   return (
     <div
       className="glass-sidebar fixed left-0 top-0 bottom-0 flex flex-col z-50"
@@ -140,10 +156,10 @@ export default function Sidebar() {
             Patrimoine net
           </div>
           <div style={{ fontSize: 24, fontWeight: 300, color: "#1D1D1F", letterSpacing: "-1px", lineHeight: 1 }}>
-            479 k€
+            {patrimoine ? formatPatrimoine(patrimoine.patrimoineNet) : "..."}
           </div>
           <div style={{ fontSize: 11, color: "#86868B", marginTop: 4 }}>
-            ~600 k€ immobilier
+            {patrimoine ? `dont ${formatPatrimoine(patrimoine.totalImmo)} immobilier` : ""}
           </div>
         </div>
       </div>

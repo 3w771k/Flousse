@@ -19,7 +19,6 @@ function getApiKey(): string | null {
 function buildFullContext(from: string, to: string) {
   const db = getDb();
 
-  // All transactions for the period
   const txs = db.prepare(`
     SELECT t.id, t.label, t.amount, t.date, t.category_id, t.account_id,
            c.name as cat_name, c.type as cat_type, c.parent_id,
@@ -37,29 +36,30 @@ function buildFullContext(from: string, to: string) {
     account_name: string; account_bank: string;
   }[];
 
-  // Accounts
-  const accounts = db.prepare("SELECT id, name, bank, type, balance FROM accounts ORDER BY balance DESC").all() as {
-    id: string; name: string; bank: string; type: string; balance: number;
+  const accounts = db.prepare("SELECT id, name, bank, type, balance, seed_balance FROM accounts ORDER BY balance DESC").all() as {
+    id: string; name: string; bank: string; type: string; balance: number; seed_balance: number;
   }[];
 
-  // Budgets
   const budgets = db.prepare(`
     SELECT c.id, c.name, c.budget FROM categories c
     WHERE c.budget IS NOT NULL AND c.parent_id IS NULL
   `).all() as { id: string; name: string; budget: number }[];
 
-  // Compute summary
+  // Financial facts from settings
+  const getSetting = (key: string) => {
+    const row = db.prepare("SELECT value FROM settings WHERE key = ?").get(key) as { value: string } | undefined;
+    return row?.value || null;
+  };
+
   const income = txs.filter(t => t.cat_type === "income").reduce((s, t) => s + t.amount, 0);
   const expense = txs.filter(t => t.cat_type === "expense").reduce((s, t) => s + Math.abs(t.amount), 0);
   const debt = txs.filter(t => t.cat_type === "dette").reduce((s, t) => s + Math.abs(t.amount), 0);
   const savings = income - expense - debt;
 
-  // Number of months in period
   const fromDate = new Date(from);
   const toDate = new Date(to);
   const monthsDiff = Math.max(1, (toDate.getFullYear() - fromDate.getFullYear()) * 12 + toDate.getMonth() - fromDate.getMonth() + 1);
 
-  // Format transactions as compact JSON
   const txJson = txs.map(t => ({
     date: t.date,
     label: t.label,
@@ -71,12 +71,10 @@ function buildFullContext(from: string, to: string) {
     bank: t.account_bank,
   }));
 
-  // Format accounts
   const accountsList = accounts.map(a =>
-    `- ${a.name} (${a.bank}, ${a.type}): ${a.balance.toFixed(0)}€`
+    `- ${a.name} (${a.bank}, ${a.type}): ${a.balance.toFixed(2)}€`
   ).join("\n");
 
-  // Budget vs actual
   const byParent: Record<string, number> = {};
   for (const t of txs) {
     if (t.cat_type !== "expense") continue;
@@ -89,18 +87,25 @@ function buildFullContext(from: string, to: string) {
     return `- ${b.name}: ${actual.toFixed(0)}€ dépensé / ${b.budget}€ budget (${b.budget > 0 ? ((actual / b.budget) * 100).toFixed(0) : "N/A"}%)`;
   }).join("\n");
 
+  // Immobilier values
+  const immoSci = getSetting("immo_sci") || "300000";
+  const immoLille40 = getSetting("immo_lille40") || "200000";
+  const immoLille19 = getSetting("immo_lille19") || "100000";
+
   return {
     from, to, monthsDiff,
     income, expense, debt, savings,
     totalBalance: accounts.reduce((s, a) => s + a.balance, 0),
     accountsList,
+    accounts,
     budgetComparison: budgetComparison || "Aucun budget défini",
     txJson,
     txCount: txs.length,
+    immoSci, immoLille40, immoLille19,
   };
 }
 
-// ─── System prompt (shared across all tabs) ────────────────────────────────────
+// ─── System prompt ────────────────────────────────────────────────────────────
 
 const SYSTEM_PROMPT = `You are a financial analysis AI specialized in personal banking transaction analysis.
 Your role is to analyze a user's complete financial situation based on their financial summary and raw banking transactions.
@@ -129,9 +134,9 @@ STYLE GUIDELINES
 - Keep explanations clear and structured.
 - Write in French.`;
 
-// ─── Prompts par onglet ────────────────────────────────────────────────────────
+// ─── Prompts spécifiques par onglet ──────────────────────────────────────────
 
-function buildDashboardPrompt(ctx: ReturnType<typeof buildFullContext>): string {
+function buildDataHeader(ctx: ReturnType<typeof buildFullContext>): string {
   return `FINANCIAL SUMMARY
 monthly_income_average: ${(ctx.income / ctx.monthsDiff).toFixed(0)}€
 monthly_expenses_average: ${(ctx.expense / ctx.monthsDiff).toFixed(0)}€
@@ -140,65 +145,205 @@ total_income: ${ctx.income.toFixed(0)}€
 total_expenses: ${ctx.expense.toFixed(0)}€
 total_debt_payments: ${ctx.debt.toFixed(0)}€
 net_savings: ${ctx.savings.toFixed(0)}€
-analysis_period_start: ${ctx.from}
-analysis_period_end: ${ctx.to}
-period_months: ${ctx.monthsDiff}
+analysis_period: ${ctx.from} to ${ctx.to} (${ctx.monthsDiff} months)
 
-ACCOUNTS (total balance: ${ctx.totalBalance.toFixed(0)}€)
+ACCOUNTS (total: ${ctx.totalBalance.toFixed(0)}€)
 ${ctx.accountsList}
 
 BUDGET VS ACTUAL
 ${ctx.budgetComparison}
 
-TRANSACTIONS (${ctx.txCount} transactions)
-${JSON.stringify(ctx.txJson, null, 0)}
-
-TASK
-Analyze the user's financial situation using the provided data.
-Your analysis must include ALL of the following sections, each as a <div class="ai-section">:
-
-1. <div class="ai-section-title">📋 Synthèse</div>
-Provide a concise executive summary of the user's financial situation for this period. Key numbers, overall health, main takeaway.
-
-2. <div class="ai-section-title">💵 Analyse des revenus</div>
-Identify income sources, reliability, regularity, and any irregular income patterns.
-
-3. <div class="ai-section-title">📊 Ventilation des dépenses</div>
-Analyze spending distribution by category and sub-category. Identify the most significant cost centers. Give percentages and amounts for each. Compare to budget when available.
-
-4. <div class="ai-section-title">🔄 Comportements de dépense</div>
-Detect recurring habits: frequent restaurant spending, impulsive purchases, micro-transactions patterns, weekend vs weekday spending, recurring merchants.
-
-5. <div class="ai-section-title">📱 Audit des abonnements</div>
-Identify all recurring subscriptions and estimate potential unused or redundant services. Quantify total monthly subscription cost.
-
-6. <div class="ai-section-title">📅 Patterns saisonniers</div>
-Identify periods with unusually high spending and possible causes. Week-by-week or day-by-day patterns if visible.
-
-7. <div class="ai-section-title">🔍 Anomalies détectées</div>
-Highlight unusual or exceptional transactions that deviate significantly from normal spending patterns. Flag any suspicious or unexpected amounts.
-
-8. <div class="ai-section-title">🎯 Opportunités d'optimisation</div>
-Estimate how much the user could realistically save by adjusting specific categories. Give concrete numbers: current amount → target → savings potential.
-
-9. <div class="ai-section-title">📈 Projection d'épargne</div>
-Estimate future savings over 6 months and 1 year based on current behavior AND based on optimized behavior.
-
-10. <div class="ai-section-title">🏥 Score de santé financière</div>
-Give a score from 1 to 10 based on:
-- spending discipline
-- savings capacity
-- financial stability
-- predictability of finances
-Explain each sub-score briefly.
-
-11. <div class="ai-section-title">✅ Recommandations prioritaires</div>
-Provide clear and practical recommendations prioritized by financial impact. Each recommendation must include the expected savings or benefit in euros.
-
-IMPORTANT: Be thorough and detailed. Each section must contain substantive analysis based on the actual data. Minimum 1000 words total.`;
+TRANSACTIONS (${ctx.txCount})
+${JSON.stringify(ctx.txJson, null, 0)}`;
 }
 
-// ─── Route GET — récupérer l'analyse en cache ────────────────────────────────
+function buildDashboardPrompt(ctx: ReturnType<typeof buildFullContext>): string {
+  return `${buildDataHeader(ctx)}
+
+TASK: Full financial analysis for the dashboard.
+Include ALL 11 sections, each as a <div class="ai-section">:
+
+1. 📋 Synthèse — Executive summary with key numbers and overall health.
+2. 💵 Analyse des revenus — Income sources, reliability, regularity.
+3. 📊 Ventilation des dépenses — Spending by category with percentages, amounts, budget comparison.
+4. 🔄 Comportements de dépense — Recurring habits, frequent merchants, micro-transactions, weekday/weekend patterns.
+5. 📱 Audit des abonnements — All recurring subscriptions, total monthly cost, unused or redundant.
+6. 📅 Patterns saisonniers — Periods with unusually high spending, week-by-week patterns.
+7. 🔍 Anomalies détectées — Unusual transactions deviating from normal patterns, suspicious amounts.
+8. 🎯 Opportunités d'optimisation — Savings potential per category: current → target → savings.
+9. 📈 Projection d'épargne — 6-month and 1-year savings with current vs optimized behavior.
+10. 🏥 Score de santé financière — Score 1-10 with sub-scores for discipline, savings capacity, stability, predictability.
+11. ✅ Recommandations prioritaires — Actionable recommendations with expected savings in euros.
+
+Be thorough and detailed. Minimum 1000 words.`;
+}
+
+function buildTransactionsPrompt(ctx: ReturnType<typeof buildFullContext>): string {
+  return `${buildDataHeader(ctx)}
+
+TASK: Analyze the transactions to help classify and detect anomalies.
+Include ALL 5 sections, each as a <div class="ai-section">:
+
+1. <div class="ai-section-title">🔍 Transactions suspectes</div>
+Identify transactions with unusual amounts compared to the merchant's average, potential duplicates, or unexpected timing (weekend transactions on professional accounts).
+
+2. <div class="ai-section-title">❓ Classifications douteuses</div>
+List all transactions classified as "Divers / Non classé" or with low confidence. For each, propose the most likely category and explain why.
+
+3. <div class="ai-section-title">🔄 Marchands récurrents</div>
+Identify merchants that appear every month or regularly. For each, state their most probable category and average amount.
+
+4. <div class="ai-section-title">💸 Micro-transactions</div>
+Identify accumulation of small amounts (<5€) that go unnoticed. Calculate the total impact over the period.
+
+5. <div class="ai-section-title">✅ Recommandations de reclassification</div>
+For each misclassified transaction, recommend the correct category. Format: "MERCHANT is classified as X but should be Y because Z."
+
+Be specific — reference actual transaction labels and amounts from the data.`;
+}
+
+function buildCashflowPrompt(ctx: ReturnType<typeof buildFullContext>): string {
+  return `${buildDataHeader(ctx)}
+
+TASK: Analyze cash-flow trends and project the future.
+Include ALL 6 sections, each as a <div class="ai-section">:
+
+1. <div class="ai-section-title">💵 Évolution des revenus</div>
+Analyze salary stability over the period. Identify any income that appeared or disappeared (e.g., rental income, bonuses). Quantify the impact of any changes.
+
+2. <div class="ai-section-title">📊 Évolution des dépenses</div>
+Identify which expense categories are increasing or decreasing month-over-month. Show trends with numbers.
+
+3. <div class="ai-section-title">⚖️ Taux d'effort crédits</div>
+Calculate the ratio of credit payments to income. Show how it evolves. Flag if it exceeds 33%.
+
+4. <div class="ai-section-title">📈 Projection 6 mois</div>
+Based on trends, project the monthly balance for the next 6 months. Include TWO scenarios:
+- Scenario 1: Current situation (without rental income)
+- Scenario 2: With rental income restored (+1300€/month)
+Present as an HTML table.
+
+5. <div class="ai-section-title">📅 Dates clés</div>
+Identify important financial milestones from the data (e.g., loans ending, seasonal expenses). Project their impact on cash-flow.
+
+6. <div class="ai-section-title">🚨 Alerte trésorerie</div>
+If projections show any month where the current account risks going to zero or negative, flag it clearly with the projected date and deficit amount.
+
+Be data-driven — use actual monthly figures from the transactions.`;
+}
+
+function buildBanksPrompt(ctx: ReturnType<typeof buildFullContext>): string {
+  return `${buildDataHeader(ctx)}
+
+ADDITIONAL CONTEXT:
+Real estate assets: SCI (25%) = ${ctx.immoSci}€, Lille 40m² = ${ctx.immoLille40}€, Lille 19m² = ${ctx.immoLille19}€
+
+TASK: Analyze account structure and optimize banking allocation.
+Include ALL 5 sections, each as a <div class="ai-section">:
+
+1. <div class="ai-section-title">💤 Comptes dormants</div>
+Identify accounts with little or no activity. Quantify their balance and the opportunity cost of idle money. Suggest what to do with each.
+
+2. <div class="ai-section-title">🏠 Compte immo sous perfusion</div>
+Quantify how much has been transferred from the main checking account to the real estate account over the period. Alert on sustainability. Calculate the monthly burn rate.
+
+3. <div class="ai-section-title">👧 Répartition épargne enfants</div>
+Compare savings allocated to each child (checking accounts + savings accounts). Signal any imbalance. Project the gap over time based on current contributions.
+
+4. <div class="ai-section-title">📊 PEA / Bourse</div>
+Analyze the PEA account performance based on its current balance relative to invested capital (if derivable from transactions). Comment on the strategy.
+
+5. <div class="ai-section-title">🏧 Frais bancaires</div>
+Accumulate all bank fees detected in transactions (non-execution fees, letters, commissions, overdraft interest). Quantify the total cost and suggest how to avoid them.
+
+Be specific — reference actual account names, balances, and transaction amounts.`;
+}
+
+function buildAnalysisSynthesePrompt(ctx: ReturnType<typeof buildFullContext>): string {
+  return `${buildDataHeader(ctx)}
+
+TASK: Concise monthly synthesis.
+Include exactly 4 sections, each as a <div class="ai-section">:
+
+1. <div class="ai-section-title">📋 Situation globale</div>
+Brief overview of the financial situation this period: income, expenses, savings rate, overall trend.
+
+2. <div class="ai-section-title">🚨 Top 3 alertes</div>
+The 3 most concerning financial issues detected. Each must include a specific amount.
+
+3. <div class="ai-section-title">✅ Top 3 points positifs</div>
+The 3 best financial behaviors or improvements. Each must include a specific amount.
+
+4. <div class="ai-section-title">🎯 Recommandation n°1</div>
+The single most impactful action the user should take. Quantify the expected benefit.
+
+Keep it concise — maximum 400 words. Focus on the most important insights.`;
+}
+
+function buildAnalysisAnomaliesPrompt(ctx: ReturnType<typeof buildFullContext>): string {
+  return `${buildDataHeader(ctx)}
+
+TASK: Detect all anomalies in transactions.
+Include exactly 3 sections, each as a <div class="ai-section">:
+
+1. <div class="ai-section-title">⚠️ Écarts significatifs</div>
+List each transaction that deviates by >50% from the historical average for that merchant or category. Show: merchant, amount, average, deviation %.
+
+2. <div class="ai-section-title">🆕 Nouveaux marchands</div>
+List merchants that appear for the first time in this period (never seen in previous months). Flag the amounts.
+
+3. <div class="ai-section-title">💰 Transactions > 200€</div>
+List all transactions above 200€ (attention threshold). For each, indicate if it's expected/recurring or exceptional.
+
+Format each anomaly clearly with the date, amount, merchant, and reason for flagging.`;
+}
+
+function buildAnalysisOptimisationsPrompt(ctx: ReturnType<typeof buildFullContext>): string {
+  return `${buildDataHeader(ctx)}
+
+TASK: Identify optimization opportunities.
+Include exactly 4 sections, each as a <div class="ai-section">:
+
+1. <div class="ai-section-title">📊 Budget vs Réel par catégorie</div>
+Compare each parent category's actual spending to its budget. Flag categories significantly over budget. Show the overshoot in euros and percentage.
+
+2. <div class="ai-section-title">🎯 Top 3 postes à réduire</div>
+Identify the 3 expense categories with the most reduction potential. For each: current spending, realistic target, monthly savings potential.
+
+3. <div class="ai-section-title">💰 Économie potentielle totale</div>
+Sum up all identified savings. Present monthly and annual projections.
+
+4. <div class="ai-section-title">📱 Audit abonnements récurrents</div>
+List all detected monthly recurring payments (subscriptions, insurances, telecoms). Show the total monthly cost. Identify potential redundancies or unused services.
+
+Be concrete — use actual amounts from the data.`;
+}
+
+function buildAnalysisProjectionsPrompt(ctx: ReturnType<typeof buildFullContext>): string {
+  return `${buildDataHeader(ctx)}
+
+ADDITIONAL CONTEXT:
+Real estate assets: SCI (25%) = ${ctx.immoSci}€, Lille 40m² = ${ctx.immoLille40}€, Lille 19m² = ${ctx.immoLille19}€
+
+TASK: Project finances 6 months forward.
+Include exactly 2 sections, each as a <div class="ai-section">:
+
+1. <div class="ai-section-title">📈 Projections à 6 mois</div>
+Create an HTML table projecting monthly finances for the next 6 months, with 3 scenarios:
+- Scenario 1: Current situation (no rental income)
+- Scenario 2: Rental income restored (+1300€/month)
+- Scenario 3: Rental income restored + after personal loan ends (frees ~185€/month)
+
+Table columns: Month | Revenus | Dépenses | Crédits | Solde | Épargne cumulée
+Use <table>, <thead>, <tbody>, <tr>, <th>, <td> tags.
+
+2. <div class="ai-section-title">🔮 Analyse des scénarios</div>
+Explain each scenario's implications. When does the user break even? When do they start accumulating savings significantly? What's the patrimonial impact at 1 year?
+
+Base all numbers on actual averages from the transaction data.`;
+}
+
+// ─── Route GET — cached analysis ─────────────────────────────────────────────
 
 export async function GET(req: NextRequest) {
   try {
@@ -227,7 +372,7 @@ export async function GET(req: NextRequest) {
   }
 }
 
-// ─── Route POST — générer (ou regénérer) une analyse ─────────────────────────
+// ─── Route POST — generate analysis ─────────────────────────────────────────
 
 export async function POST(req: NextRequest) {
   try {
@@ -244,7 +389,6 @@ export async function POST(req: NextRequest) {
     const { tab, from, to, force } = body;
     const db = getDb();
 
-    // Default to current month if no period given
     const now = new Date();
     const defaultFrom = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
     const defaultTo = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().slice(0, 10);
@@ -252,7 +396,7 @@ export async function POST(req: NextRequest) {
     const periodFrom = from || defaultFrom;
     const periodTo = to || defaultTo;
 
-    // Check cache (unless force refresh)
+    // Check cache
     if (!force) {
       const cached = db.prepare(
         "SELECT content, created_at FROM analyses WHERE tab = ? AND period_from = ? AND period_to = ? ORDER BY created_at DESC LIMIT 1"
@@ -263,15 +407,22 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Build context and prompt
+    // Build context and select prompt
     const ctx = buildFullContext(periodFrom, periodTo);
-    let userPrompt: string;
 
-    if (tab === "dashboard") {
-      userPrompt = buildDashboardPrompt(ctx);
-    } else {
-      userPrompt = buildDashboardPrompt(ctx);
-    }
+    const promptMap: Record<string, (ctx: ReturnType<typeof buildFullContext>) => string> = {
+      dashboard: buildDashboardPrompt,
+      transactions: buildTransactionsPrompt,
+      cashflow: buildCashflowPrompt,
+      banks: buildBanksPrompt,
+      "analysis-synthese": buildAnalysisSynthesePrompt,
+      "analysis-anomalies": buildAnalysisAnomaliesPrompt,
+      "analysis-optimisations": buildAnalysisOptimisationsPrompt,
+      "analysis-projections": buildAnalysisProjectionsPrompt,
+    };
+
+    const buildPrompt = promptMap[tab] || buildDashboardPrompt;
+    const userPrompt = buildPrompt(ctx);
 
     // Fetch previous period analysis for context continuity
     const fromDate = new Date(periodFrom);
@@ -283,35 +434,38 @@ export async function POST(req: NextRequest) {
       "SELECT content, period_from, period_to FROM analyses WHERE tab = ? AND period_from = ? AND period_to = ? ORDER BY created_at DESC LIMIT 1"
     ).get(tab, prevFrom, prevTo) as { content: string; period_from: string; period_to: string } | undefined;
 
-    // Build messages with optional previous analysis context
     const messages: { role: "user" | "assistant"; content: string }[] = [];
 
     if (prevAnalysis) {
       messages.push({
         role: "user",
-        content: `Here is the previous period analysis (${prevAnalysis.period_from} to ${prevAnalysis.period_to}) for context and comparison:\n\n${prevAnalysis.content}`,
+        content: `Previous period analysis (${prevAnalysis.period_from} to ${prevAnalysis.period_to}) for trend comparison:\n\n${prevAnalysis.content}`,
       });
       messages.push({
         role: "assistant",
-        content: "J'ai bien noté l'analyse de la période précédente. Je vais l'utiliser pour comparer les tendances et identifier les évolutions.",
+        content: "Noted. I will reference changes and trends compared to the previous period.",
       });
     }
 
     messages.push({ role: "user", content: userPrompt });
 
     if (prevAnalysis) {
-      messages[messages.length - 1].content += `\n\nIMPORTANT: You have the previous period analysis above. Reference specific changes and trends compared to last period. Highlight improvements AND regressions.`;
+      messages[messages.length - 1].content += `\n\nIMPORTANT: Reference specific changes and trends compared to last period.`;
     }
+
+    // Adjust thinking budget based on prompt complexity
+    const isLightPrompt = tab.startsWith("analysis-") && tab !== "analysis-projections";
+    const thinkingBudget = isLightPrompt ? 8000 : 16000;
+    const maxTokens = isLightPrompt ? 16000 : 32000;
 
     const client = new Anthropic({ apiKey });
 
-    // Use streaming to avoid 10-min SDK timeout on long thinking requests
     const stream = client.messages.stream({
-      model: "claude-sonnet-4-6-20250514",
-      max_tokens: 32000,
+      model: "claude-sonnet-4-6",
+      max_tokens: maxTokens,
       thinking: {
         type: "enabled",
-        budget_tokens: 16000,
+        budget_tokens: thinkingBudget,
       },
       system: SYSTEM_PROMPT,
       messages,
@@ -319,7 +473,6 @@ export async function POST(req: NextRequest) {
 
     const message = await stream.finalMessage();
 
-    // Extract only text blocks (skip thinking blocks)
     const html = (message.content as ContentBlock[])
       .filter((b): b is TextBlock => b.type === "text")
       .map(b => b.text)
@@ -346,13 +499,13 @@ export async function POST(req: NextRequest) {
     const msg = err instanceof Error ? err.message : "Erreur inconnue";
 
     if (msg.includes("401") || msg.includes("authentication") || msg.includes("invalid x-api-key")) {
-      return NextResponse.json({ error: "api_key_invalid", message: "Clé API invalide. Vérifiez votre clé dans Paramètres." }, { status: 401 });
+      return NextResponse.json({ error: "api_key_invalid", message: "Clé API invalide." }, { status: 401 });
     }
     if (msg.includes("429") || msg.includes("rate")) {
-      return NextResponse.json({ error: "rate_limit", message: "Limite de requêtes atteinte. Réessayez dans quelques secondes." }, { status: 429 });
+      return NextResponse.json({ error: "rate_limit", message: "Limite de requêtes. Réessayez dans quelques secondes." }, { status: 429 });
     }
     if (msg.includes("insufficient") || msg.includes("credit") || msg.includes("billing")) {
-      return NextResponse.json({ error: "billing", message: "Crédit API insuffisant. Rechargez votre compte Anthropic." }, { status: 402 });
+      return NextResponse.json({ error: "billing", message: "Crédit API insuffisant." }, { status: 402 });
     }
     return NextResponse.json({ error: "api_error", message: `Erreur API : ${msg}` }, { status: 500 });
   }

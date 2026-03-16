@@ -48,7 +48,7 @@ export async function POST(req: NextRequest) {
     const toClassify: { id: string; label: string; amount: number }[] = [];
     const withRules = newTxs.map((t) => {
       const id = randomUUID();
-      const ruleMatch = applyRules(db, t.label);
+      const ruleMatch = applyRules(db, t.label, t.amount);
       if (ruleMatch) {
         return { id, ...t, categoryId: ruleMatch, confidence: 1.0, source: "rule" as const };
       }
@@ -101,7 +101,7 @@ export async function POST(req: NextRequest) {
       preview,
       // Full data for confirmation step
       transactions: finalTxs.map((t) => ({
-        id: t.id, date: t.date, label: t.label, amount: t.amount,
+        id: t.id, date: t.date, real_date: t.real_date || null, label: t.label, amount: t.amount,
         categoryId: t.categoryId, confidence: t.confidence, source: t.source,
       })),
       accountId,

@@ -1,8 +1,11 @@
 "use client";
 import { useState } from "react";
 
-const SparkleIcon = () => (
-  <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#007AFF" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+const SparkleIcon = ({ pulse }: { pulse?: boolean }) => (
+  <svg
+    className={pulse ? "sparkle-pulse" : ""}
+    width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#007AFF" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"
+  >
     <path d="M8 1l1.5 3 3.5.5-2.5 2.5.5 3.5L8 9l-3 1.5.5-3.5L3 4.5l3.5-.5z"/>
   </svg>
 );
@@ -22,6 +25,7 @@ interface AIPanelProps {
   onForceRefresh?: () => void;
   refreshLoading?: boolean;
   collapsedHeight?: number;
+  hasCachedAnalysis?: boolean;
 }
 
 export default function AIPanel({
@@ -32,6 +36,7 @@ export default function AIPanel({
   onForceRefresh,
   refreshLoading = false,
   collapsedHeight = 400,
+  hasCachedAnalysis = false,
 }: AIPanelProps) {
   const [expanded, setExpanded] = useState(false);
   const isLong = content.length > 800;
@@ -40,28 +45,31 @@ export default function AIPanel({
     <div className="rounded-apple" style={{ background: "#F5F5F7", border: "1px solid rgba(0,122,255,0.10)", overflow: "hidden" }}>
       <div className="flex items-center justify-between px-5 py-3" style={{ borderBottom: "1px solid rgba(0,0,0,0.04)" }}>
         <div className="flex items-center gap-2">
-          <SparkleIcon />
-          <span style={{ fontSize: 13, fontWeight: 500, color: "#007AFF" }}>{title}</span>
+          <SparkleIcon pulse={refreshLoading} />
+          <span style={{ fontSize: 13, fontWeight: 500, color: "#007AFF" }}>
+            {refreshLoading ? "Analyse en cours\u2026" : title}
+          </span>
         </div>
         <div className="flex items-center gap-3">
           {timestamp && (
             <span style={{ fontSize: 11, color: "#AEAEB2" }}>Généré le {timestamp}</span>
           )}
-          {onForceRefresh && (
+          {hasCachedAnalysis && onForceRefresh && (
             <button
               onClick={onForceRefresh}
               disabled={refreshLoading}
               style={{
-                fontSize: 11, fontWeight: 400, color: refreshLoading ? "#AEAEB2" : "#86868B",
-                background: "none", border: "none",
+                fontSize: 11, fontWeight: 500, color: "white",
+                background: refreshLoading ? "#AEAEB2" : "#007AFF",
+                border: "none", borderRadius: 6, padding: "4px 12px",
                 cursor: refreshLoading ? "default" : "pointer",
-                textDecoration: "underline",
+                transition: "background 150ms ease",
               }}
             >
-              Regénérer
+              {refreshLoading ? "Analyse en cours\u2026" : "Regénérer"}
             </button>
           )}
-          {onRefresh && (
+          {!hasCachedAnalysis && onRefresh && (
             <button
               onClick={onRefresh}
               disabled={refreshLoading}
@@ -73,7 +81,7 @@ export default function AIPanel({
                 transition: "background 150ms ease",
               }}
             >
-              {refreshLoading ? "Analyse en cours\u2026" : (timestamp ? "Analyser" : "Générer")}
+              {refreshLoading ? "Analyse en cours\u2026" : "Générer"}
             </button>
           )}
         </div>

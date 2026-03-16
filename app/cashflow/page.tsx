@@ -40,15 +40,36 @@ export default function CashflowPage() {
 
   useEffect(() => { loadData(); }, [loadData]);
 
-  const refreshAI = async () => {
+  const [aiDate, setAiDate] = useState<string | null>(null);
+
+  // Load cached analysis on mount
+  useEffect(() => {
+    const now = new Date();
+    const to = now.toISOString().slice(0, 10);
+    const from = new Date(now.getFullYear() - 1, now.getMonth(), 1).toISOString().slice(0, 10);
+    fetch(`/api/analyze?tab=cashflow&from=${from}&to=${to}`)
+      .then((r) => r.json())
+      .then((d) => { if (d.cached && d.content) { setAiContent(d.content); setAiDate(d.created_at); } })
+      .catch(() => {});
+  }, []);
+
+  const refreshAI = async (force = false) => {
     setAiLoading(true);
+    const now = new Date();
+    const to = now.toISOString().slice(0, 10);
+    const from = new Date(now.getFullYear() - 1, now.getMonth(), 1).toISOString().slice(0, 10);
     try {
       const res = await fetch("/api/analyze", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ type: "projections" }),
+        body: JSON.stringify({ tab: "cashflow", from, to, force }),
       });
       const d = await res.json();
-      setAiContent(res.ok ? (d.content || "Aucun contenu") : (d.message || d.error || "Erreur API"));
+      if (res.ok) {
+        setAiContent(d.content || "Aucun contenu");
+        setAiDate(d.created_at || null);
+      } else {
+        setAiContent(d.message || d.error || "Erreur API");
+      }
     } catch {
       setAiContent("Erreur de connexion");
     }
@@ -99,9 +120,10 @@ export default function CashflowPage() {
       <div className="mb-5">
         <AIPanel
           title="Analyser mon cash-flow"
-          content={aiContent || "<p>Chargement de l'analyse cash-flow…</p>"}
-          timestamp="données en temps réel"
-          onRefresh={refreshAI}
+          content={aiContent || `<p style="color:#AEAEB2">Cliquez sur "Générer" pour analyser votre cash-flow.</p>`}
+          timestamp={aiDate ? new Date(aiDate + "Z").toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" }) : ""}
+          onRefresh={() => refreshAI(false)}
+          onForceRefresh={aiDate ? () => refreshAI(true) : undefined}
           refreshLoading={aiLoading}
         />
       </div>

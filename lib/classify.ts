@@ -13,97 +13,241 @@ export interface ClassifyResult {
   confidence: number;
 }
 
+// ── Built-in rule types ─────────────────────────────────────────────────────
+interface BuiltinRule {
+  /** Pattern to match against the label — plain substring or regex (use .* for wildcards) */
+  pattern: string;
+  /** Target category when the rule matches */
+  categoryId: string;
+  /** If set, the amount must be > this value for the rule to match (exclusive) */
+  minAmount?: number;
+  /** If set, the amount must be < this value for the rule to match (exclusive) */
+  maxAmount?: number;
+  /** If true, pattern is treated as a regex; otherwise as a plain substring */
+  regex?: boolean;
+  /** Extra label condition: label must also contain this substring (case-insensitive) */
+  labelContains?: string;
+}
+
 // ── Built-in rules for common merchants (applied before DB rules) ──────────
-const BUILTIN_RULES: [string, string][] = [
-  // Shopping
-  ["AMAZON", "shopping"],
-  ["FNAC", "shopping"],
-  ["DARTY", "shopping"],
-  ["IKEA", "shopping"],
-  ["ZARA", "shopping"],
-  ["H&M", "shopping"],
-  ["UNIQLO", "shopping"],
-  ["DECATHLON", "shopping"],
-  ["LEROY MERLIN", "shopping"],
-  ["CASTORAMA", "shopping"],
-  ["MONOPRIX", "courses"],
-  ["AUCHAN", "courses"],
-  ["LECLERC", "courses"],
-  ["LIDL", "courses"],
-  ["INTERMARCHE", "courses"],
-  ["CASINO", "courses"],
-  ["BIOCOOP", "courses"],
-  ["NATURALIA", "courses"],
-  ["GRAND FRAIS", "courses"],
-  ["BOULANGERIE", "courses"],
-  // Abonnements
-  ["NETFLIX", "abonnements"],
-  ["SPOTIFY", "abonnements"],
-  ["DISNEY PLUS", "abonnements"],
-  ["CANAL+", "abonnements"],
-  ["CANAL PLUS", "abonnements"],
-  ["APPLE.COM/BILL", "abonnements"],
-  ["ADOBE", "abonnements"],
-  ["MICROSOFT", "abonnements"],
-  ["GOOGLE STORAGE", "abonnements"],
-  ["AMAZON PRIME", "abonnements"],
-  // Restaurants
-  ["RESTAURANT", "resto"],
-  ["BRASSERIE", "resto"],
-  ["SUSHI", "resto"],
-  ["MCDONALDS", "resto"],
-  ["BURGER KING", "resto"],
-  ["STARBUCKS", "resto"],
-  // Livraison
-  ["DELIVEROO", "livraison"],
-  ["UBER EATS", "livraison"],
-  ["JUST EAT", "livraison"],
-  // Transport
-  ["NAVIGO", "transport-commun"],
-  ["RATP", "transport-commun"],
-  ["SNCF", "transport-commun"],
-  ["UBER ", "taxi"],
-  ["G7 TAXI", "taxi"],
-  ["BOLT", "taxi"],
-  ["KAPTEN", "taxi"],
-  ["TOTAL ENERGIES", "voiture"],
-  ["SHELL", "voiture"],
-  ["IZIVIA", "voiture"],
-  ["SAEMES", "voiture"],
-  ["PARKING", "voiture"],
-  ["AUTOROUTE", "voiture"],
-  // Telecom
-  ["BOUYGUES TELECOM", "telecom"],
-  ["SFR", "telecom"],
-  ["FREE MOBILE", "telecom"],
-  ["ORANGE", "telecom"],
-  // Santé
-  ["PHARMACIE", "sante"],
-  ["DOCTEUR", "sante"],
-  ["CPAM", "sante"],
-  ["AMELI", "sante"],
-  // Logement
-  ["VERISURE", "securite"],
-  ["EDF", "logement"],
-  ["ENGIE", "logement"],
-  // Crédits
-  ["ECHEANCE PRET", "credit-immo"],
-  ["AMERICAN EXPRESS", "amex-prlv"],
-  // Revenus
-  ["SALAIRE", "salaire"],
-  ["CAF ", "allocations"],
-  ["POLE EMPLOI", "allocations"],
-  ["FRANCE TRAVAIL", "allocations"],
+// Rules are evaluated top-to-bottom; first match wins.
+// More specific rules (with amount/regex conditions) should come before generic ones.
+const BUILTIN_RULES: BuiltinRule[] = [
+  // ── Courses (groceries) ──
+  { pattern: "CARREFOURMARKET", categoryId: "courses" },
+  { pattern: "MON-MARCHE", categoryId: "courses" },
+  { pattern: "PICARD", categoryId: "courses" },
+  { pattern: "FABLES.*FROMAGE", categoryId: "courses", regex: true },
+  { pattern: "POINT CENTRAL", categoryId: "courses" },
+  { pattern: "BOUCHERIE BAGATE", categoryId: "courses" },
+  { pattern: "FERME DE WIND", categoryId: "courses" },
+  { pattern: "GRAIN D.OR", categoryId: "courses", regex: true },
+  { pattern: "FOURNIL", categoryId: "courses" },
+  { pattern: "HELLOFRESH", categoryId: "courses" },
+  { pattern: "INTERCAVES", categoryId: "courses" },
+  { pattern: "GOURMAND CROQUANT", categoryId: "courses" },
+  { pattern: "MONOPRIX", categoryId: "courses" },
+  { pattern: "AUCHAN", categoryId: "courses" },
+  { pattern: "LECLERC", categoryId: "courses" },
+  { pattern: "LIDL", categoryId: "courses" },
+  { pattern: "INTERMARCHE", categoryId: "courses" },
+  { pattern: "CASINO", categoryId: "courses" },
+  { pattern: "BIOCOOP", categoryId: "courses" },
+  { pattern: "NATURALIA", categoryId: "courses" },
+  { pattern: "GRAND FRAIS", categoryId: "courses" },
+  { pattern: "BOULANGERIE", categoryId: "courses" },
+
+  // ── Restaurants ──
+  { pattern: "WAZI", categoryId: "resto" },
+  { pattern: "MOUSQUETAIRE", categoryId: "resto" },
+  { pattern: "RELAIS ST CLOUD", categoryId: "resto" },
+  { pattern: "CHEZ PAPA", categoryId: "resto" },
+  { pattern: "BAAN LAO", categoryId: "resto" },
+  { pattern: "DAMMANN", categoryId: "resto" },
+  { pattern: "PPGMICHALAK", categoryId: "resto" },
+  { pattern: "RESTAURANT", categoryId: "resto" },
+  { pattern: "BRASSERIE", categoryId: "resto" },
+  { pattern: "SUSHI", categoryId: "resto" },
+  { pattern: "MCDONALDS", categoryId: "resto" },
+  { pattern: "BURGER KING", categoryId: "resto" },
+  { pattern: "STARBUCKS", categoryId: "resto" },
+
+  // ── Garde d'enfants ──
+  { pattern: "LPCR", categoryId: "garde" },
+  { pattern: "KINOUGARDE", categoryId: "garde" },
+  { pattern: "URSSAF.*CNCESU", categoryId: "garde", regex: true },
+  { pattern: "CNCESU", categoryId: "garde" },
+
+  // ── Voiture / stationnement (SHELL EV before generic SHELL) ──
+  { pattern: "IZIVIA", categoryId: "voiture" },
+  { pattern: "CHARGEMAP", categoryId: "voiture" },
+  { pattern: "SHELL EV", categoryId: "voiture" },
+  { pattern: "TESLA", categoryId: "voiture" },
+  { pattern: "FASTNED", categoryId: "voiture" },
+  { pattern: "IONITY", categoryId: "voiture" },
+  { pattern: "BIPANDGO", categoryId: "voiture" },
+  { pattern: "INDIGO", categoryId: "voiture" },
+  { pattern: "SAEMES", categoryId: "voiture" },
+  { pattern: "EASYPARK", categoryId: "voiture" },
+  { pattern: "STATTELPAYBYPHO", categoryId: "voiture" },
+  { pattern: "TOTAL ENERGIES", categoryId: "voiture" },
+  { pattern: "SHELL", categoryId: "voiture" },
+  { pattern: "PARKING", categoryId: "voiture" },
+  { pattern: "AUTOROUTE", categoryId: "voiture" },
+
+  // ── Taxi ──
+  { pattern: "G7", categoryId: "taxi" },
+  { pattern: "UBER ", categoryId: "taxi" },
+  { pattern: "BOLT", categoryId: "taxi" },
+  { pattern: "KAPTEN", categoryId: "taxi" },
+
+  // ── Sécurité / copro / conseil ──
+  { pattern: "VERISURE", categoryId: "securite" },
+  { pattern: "VACHERAND", categoryId: "copro" },
+  { pattern: "AJM CONSEIL", categoryId: "comptable-avocat" },
+  { pattern: "VDOUBLEV", categoryId: "comptable-avocat" },
+
+  // ── Salaire (amount-conditional: only if amount > 1000) ──
+  { pattern: "SINEQUA", categoryId: "salaire", minAmount: 1000 },
+  { pattern: "CHAPSVISION", categoryId: "salaire", minAmount: 1000 },
+  { pattern: "CIC.*CHAPSVISION", categoryId: "salaire", minAmount: 1000, regex: true },
+
+  // ── Allocations / impôts (sign-dependent: positive = revenu, negative = impots) ──
+  { pattern: "CAF DES HAUTS", categoryId: "allocations", minAmount: 0 },
+  { pattern: "D.G.F.I.P.*IMPOT", categoryId: "autre-revenu", minAmount: 0, regex: true },
+  { pattern: "D.G.F.I.P.*IMPOT", categoryId: "impots", maxAmount: 0, regex: true },
+
+  // ── Crédits / prêts (specific loan numbers before generic ECHEANCE PRET) ──
+  { pattern: "ECHEANCE PRET.*61123486", categoryId: "credit-immo", regex: true },
+  { pattern: "ECHEANCE PRET.*60837505", categoryId: "credit-immo", regex: true },
+  { pattern: "ECHEANCE PRET.*62043046", categoryId: "pret-perso", regex: true },
+  { pattern: "ECHEANCE PRET", categoryId: "credit-immo" },
+
+  // ── Virements internes ──
+  { pattern: "COMPTE JOINT", categoryId: "vir-joint", maxAmount: 0 },
+  { pattern: "EFFORT PRET IMMOBILIER", categoryId: "vir-immo" },
+  { pattern: "REMISE A FLOT", categoryId: "vir-immo" },
+  { pattern: "MISE SECURITE", categoryId: "vir-immo" },
+  { pattern: "AIDE MANQUE", categoryId: "vir-immo" },
+  { pattern: "GABRIELLE", categoryId: "vir-interne", maxAmount: 0, labelContains: "VIR" },
+
+  // ── Carte AMEX ──
+  { pattern: "AMERICAN EXPRESS", categoryId: "amex-prlv" },
+
+  // ── Frais bancaires ──
+  { pattern: "FRAIS DE NON.*EXECUTION", categoryId: "frais-bancaires", regex: true },
+  { pattern: "FRAIS DE LETTRE", categoryId: "frais-bancaires" },
+  { pattern: "COMMISSIONS", categoryId: "frais-bancaires" },
+  { pattern: "INTERETS.*DEBITEURS", categoryId: "frais-bancaires", regex: true },
+  { pattern: "MINIMUM FORFAITAIRE", categoryId: "frais-bancaires" },
+
+  // ── Abonnements / assurances ──
+  { pattern: "SEONI", categoryId: "abonnements" },
+  { pattern: "CARDIF IARD", categoryId: "assurance" },
+  { pattern: "SPB.*ASSURANCE", categoryId: "assurance", regex: true },
+  { pattern: "NETFLIX", categoryId: "abonnements" },
+  { pattern: "SPOTIFY", categoryId: "abonnements" },
+  { pattern: "DISNEY PLUS", categoryId: "abonnements" },
+  { pattern: "CANAL+", categoryId: "abonnements" },
+  { pattern: "CANAL PLUS", categoryId: "abonnements" },
+  { pattern: "APPLE.COM/BILL", categoryId: "abonnements" },
+  { pattern: "ADOBE", categoryId: "abonnements" },
+  { pattern: "MICROSOFT", categoryId: "abonnements" },
+  { pattern: "GOOGLE STORAGE", categoryId: "abonnements" },
+  { pattern: "AMAZON PRIME", categoryId: "abonnements" },
+
+  // ── Impôts / amendes ──
+  { pattern: "WEB AMENDE", categoryId: "impots" },
+  { pattern: "AMENDE", categoryId: "impots" },
+  { pattern: "TIMBRE FISCAL", categoryId: "impots" },
+
+  // ── Shopping (AMAZON PRIME already matched above) ──
+  { pattern: "AMAZON", categoryId: "shopping" },
+  { pattern: "FNAC", categoryId: "shopping" },
+  { pattern: "DARTY", categoryId: "shopping" },
+  { pattern: "IKEA", categoryId: "shopping" },
+  { pattern: "ZARA", categoryId: "shopping" },
+  { pattern: "H&M", categoryId: "shopping" },
+  { pattern: "UNIQLO", categoryId: "shopping" },
+  { pattern: "DECATHLON", categoryId: "shopping" },
+  { pattern: "LEROY MERLIN", categoryId: "shopping" },
+  { pattern: "CASTORAMA", categoryId: "shopping" },
+
+  // ── Livraison ──
+  { pattern: "DELIVEROO", categoryId: "livraison" },
+  { pattern: "UBER EATS", categoryId: "livraison" },
+  { pattern: "JUST EAT", categoryId: "livraison" },
+
+  // ── Transport en commun ──
+  { pattern: "NAVIGO", categoryId: "transport-commun" },
+  { pattern: "RATP", categoryId: "transport-commun" },
+  { pattern: "SNCF", categoryId: "transport-commun" },
+
+  // ── Telecom ──
+  { pattern: "BOUYGUES TELECOM", categoryId: "telecom" },
+  { pattern: "SFR", categoryId: "telecom" },
+  { pattern: "FREE MOBILE", categoryId: "telecom" },
+  { pattern: "ORANGE", categoryId: "telecom" },
+
+  // ── Santé ──
+  { pattern: "PHARMACIE", categoryId: "sante" },
+  { pattern: "DOCTEUR", categoryId: "sante" },
+  { pattern: "CPAM", categoryId: "sante" },
+  { pattern: "AMELI", categoryId: "sante" },
+
+  // ── Logement ──
+  { pattern: "EDF", categoryId: "logement" },
+  { pattern: "ENGIE", categoryId: "logement" },
+
+  // ── Divers (DAB withdrawals) ──
+  { pattern: "RETRAIT DAB", categoryId: "divers" },
+  { pattern: "RET DAB", categoryId: "divers" },
+
+  // ── Revenus (generic, after specific salary/allocation rules) ──
+  { pattern: "SALAIRE", categoryId: "salaire" },
+  { pattern: "CAF ", categoryId: "allocations" },
+  { pattern: "POLE EMPLOI", categoryId: "allocations" },
+  { pattern: "FRANCE TRAVAIL", categoryId: "allocations" },
 ];
 
+// Pre-compile regex rules at module load time for performance
+const _compiledRegexCache = new Map<string, RegExp>();
+function getCompiledRegex(pattern: string): RegExp {
+  let re = _compiledRegexCache.get(pattern);
+  if (!re) {
+    re = new RegExp(pattern, "i");
+    _compiledRegexCache.set(pattern, re);
+  }
+  return re;
+}
+
+/** Check if a single builtin rule matches the given label and amount */
+function matchesRule(rule: BuiltinRule, upper: string, amount: number): boolean {
+  // 1. Check pattern (substring or regex)
+  if (rule.regex) {
+    if (!getCompiledRegex(rule.pattern).test(upper)) return false;
+  } else {
+    if (!upper.includes(rule.pattern)) return false;
+  }
+
+  // 2. Check amount conditions (minAmount = exclusive lower bound, maxAmount = exclusive upper bound)
+  if (rule.minAmount !== undefined && amount <= rule.minAmount) return false;
+  if (rule.maxAmount !== undefined && amount >= rule.maxAmount) return false;
+
+  // 3. Check extra label-contains condition
+  if (rule.labelContains && !upper.includes(rule.labelContains.toUpperCase())) return false;
+
+  return true;
+}
+
 // Apply rules from DB — returns categoryId or null
-export function applyRules(db: Database, label: string): string | null {
+export function applyRules(db: Database, label: string, amount: number = 0): string | null {
   const upper = label.toUpperCase();
 
-  // 1. Check built-in rules first
-  for (const [pattern, catId] of BUILTIN_RULES) {
-    if (upper.includes(pattern)) {
-      return catId;
+  // 1. Check built-in rules first (top-to-bottom, first match wins)
+  for (const rule of BUILTIN_RULES) {
+    if (matchesRule(rule, upper, amount)) {
+      return rule.categoryId;
     }
   }
 

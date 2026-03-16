@@ -38,7 +38,7 @@ export async function POST(req: NextRequest) {
     const toClassify: { id: string; label: string; amount: number }[] = [];
 
     for (const tx of rows) {
-      const match = applyRules(db, tx.label);
+      const match = applyRules(db, tx.label, tx.amount);
       if (match) {
         ruleUpdates.push({ id: tx.id, categoryId: match });
       } else {

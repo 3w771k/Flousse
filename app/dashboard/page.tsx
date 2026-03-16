@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import AIPanel from "@/components/AIPanel";
 import DonutChart from "@/components/DonutChart";
 
@@ -53,11 +53,14 @@ export default function DashboardPage() {
   const [aiContent, setAiContent] = useState<string | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiDate, setAiDate] = useState<string | null>(null);
+  const [cacheChecked, setCacheChecked] = useState(false);
+  const autoTriggeredRef = useRef<string | null>(null);
 
   const range = useMemo(() => getDateRange(PERIODS[periodIdx].months), [periodIdx]);
 
   // Load cached analysis when period changes
   const loadCachedAnalysis = useCallback(async (from: string, to: string) => {
+    setCacheChecked(false);
     try {
       const res = await fetch(`/api/analyze?tab=dashboard&from=${from}&to=${to}`);
       if (res.ok) {
@@ -68,6 +71,7 @@ export default function DashboardPage() {
         }
       }
     } catch { /* silent */ }
+    setCacheChecked(true);
   }, []);
 
   const loadData = useCallback(async () => {
@@ -95,10 +99,11 @@ export default function DashboardPage() {
     loadData();
     setAiContent(null);
     setAiDate(null);
+    setCacheChecked(false);
     loadCachedAnalysis(range.from, range.to);
   }, [loadData, loadCachedAnalysis, range]);
 
-  const refreshAI = async (force = false) => {
+  const refreshAI = useCallback(async (force = false) => {
     setAiLoading(true);
     try {
       const res = await fetch("/api/analyze", {
@@ -118,7 +123,16 @@ export default function DashboardPage() {
       setAiContent("<p>Erreur de connexion à l'API.</p>");
     }
     setAiLoading(false);
-  };
+  }, [range]);
+
+  // Auto-trigger analysis when no cached analysis exists and transactions are available
+  const rangeKey = `${range.from}_${range.to}`;
+  useEffect(() => {
+    if (!loading && cacheChecked && !aiContent && !aiLoading && txs.length > 0 && autoTriggeredRef.current !== rangeKey) {
+      autoTriggeredRef.current = rangeKey;
+      refreshAI(false);
+    }
+  }, [loading, cacheChecked, aiContent, aiLoading, txs.length, rangeKey, refreshAI]);
 
   // Compute stats
   let income = 0, expense = 0, debt = 0;
@@ -203,11 +217,12 @@ export default function DashboardPage() {
       <div className="mb-6">
         <AIPanel
           title="Analyse IA — Dashboard"
-          content={aiContent || `<p style="color:#AEAEB2">Cliquez sur "Générer" pour lancer une analyse complète de la période.</p>`}
+          content={aiContent || (aiLoading ? `<p style="color:#AEAEB2">Analyse en cours de génération\u2026</p>` : `<p style="color:#AEAEB2">Cliquez sur "Générer" pour lancer une analyse complète de la période.</p>`)}
           timestamp={aiDate ? new Date(aiDate + "Z").toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" }) : ""}
           onRefresh={() => refreshAI(false)}
-          onForceRefresh={aiDate ? () => refreshAI(true) : undefined}
+          onForceRefresh={() => refreshAI(true)}
           refreshLoading={aiLoading}
+          hasCachedAnalysis={!!aiDate}
         />
       </div>
 

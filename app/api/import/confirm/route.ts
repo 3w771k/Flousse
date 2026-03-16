@@ -4,6 +4,7 @@ import { getDb } from "@/lib/db";
 type TxPayload = {
   id: string;
   date: string;
+  real_date?: string | null;
   label: string;
   amount: number;
   categoryId: string;
@@ -24,24 +25,27 @@ export async function POST(req: NextRequest) {
     if (!account) return NextResponse.json({ error: "account not found" }, { status: 404 });
 
     const insert = db.prepare(`
-      INSERT OR IGNORE INTO transactions (id, account_id, date, label, amount, category_id, confidence, source)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT OR IGNORE INTO transactions (id, account_id, date, real_date, label, amount, category_id, confidence, source)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     let inserted = 0;
     db.transaction(() => {
       for (const t of body.transactions) {
-        const result = insert.run(t.id, body.accountId, t.date, t.label, t.amount, t.categoryId, t.confidence, t.source);
+        const result = insert.run(t.id, body.accountId, t.date, t.real_date || null, t.label, t.amount, t.categoryId, t.confidence, t.source);
         if (result.changes > 0) inserted++;
       }
 
-      // Recalculate account balance from all its transactions
-      // Balance = seed balance (from accounts table initial value) gets replaced by
-      // sum of all transactions for this account
+      // Recalculate balance = seed_balance + SUM(transactions)
       const sumRow = db.prepare(
         "SELECT COALESCE(SUM(amount), 0) as total FROM transactions WHERE account_id = ?"
       ).get(body.accountId) as { total: number };
-      db.prepare("UPDATE accounts SET balance = ? WHERE id = ?").run(sumRow.total, body.accountId);
+      const seedRow = db.prepare(
+        "SELECT seed_balance FROM accounts WHERE id = ?"
+      ).get(body.accountId) as { seed_balance: number };
+      db.prepare("UPDATE accounts SET balance = ? WHERE id = ?").run(
+        (seedRow?.seed_balance ?? 0) + sumRow.total, body.accountId
+      );
     })();
 
     return NextResponse.json({ ok: true, inserted });

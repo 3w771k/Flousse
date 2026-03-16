@@ -5,11 +5,12 @@ type Account = { id: string; name: string; bank: string; icon: string; type: str
 type Category = { id: string; name: string; type: string; icon: string; parent_id: string | null; budget: number | null };
 type Rule = { id: number; pattern: string; category_id: string; category_name: string; use_count: number };
 
-type Section = "accounts" | "categories" | "rules" | "api" | "export" | "reclassify" | "reset";
+type Section = "accounts" | "categories" | "rules" | "patrimoine" | "api" | "export" | "reclassify" | "reset";
 const SECTIONS: { id: Section; label: string }[] = [
   { id: "accounts", label: "Comptes" },
   { id: "categories", label: "Catégories" },
   { id: "rules", label: "Règles apprises" },
+  { id: "patrimoine", label: "Patrimoine immobilier" },
   { id: "api", label: "Clé API Claude" },
   { id: "export", label: "Export" },
   { id: "reclassify", label: "Reclassifier" },
@@ -33,6 +34,10 @@ export default function SettingsPage() {
   const [reclassifying, setReclassifying] = useState(false);
   const [reclassifyResult, setReclassifyResult] = useState<{ total: number; reclassifiedByRules: number; reclassifiedByAI: number; stillUnclassified: number } | null>(null);
   const [reclassifyError, setReclassifyError] = useState<string | null>(null);
+  const [immoSci, setImmoSci] = useState("");
+  const [immoLille40, setImmoLille40] = useState("");
+  const [immoLille19, setImmoLille19] = useState("");
+  const [immoSaved, setImmoSaved] = useState(false);
 
   const loadData = useCallback(async () => {
     try {
@@ -53,6 +58,9 @@ export default function SettingsPage() {
       setCategories(catData);
       setRules(ruleData);
       setApiKey(settingsData.claude_api_key || "");
+      setImmoSci(settingsData.immo_sci || "300000");
+      setImmoLille40(settingsData.immo_lille40 || "200000");
+      setImmoLille19(settingsData.immo_lille19 || "100000");
       // Init budget state
       const budgets: Record<string, number> = {};
       for (const c of catData as Category[]) {
@@ -148,6 +156,30 @@ export default function SettingsPage() {
       setApiError("Erreur lors de la sauvegarde");
     }
   };
+
+  const saveImmo = async () => {
+    const res = await fetch("/api/settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        immo_sci: immoSci,
+        immo_lille40: immoLille40,
+        immo_lille19: immoLille19,
+      }),
+    });
+    if (res.ok) {
+      setImmoSaved(true);
+      setTimeout(() => setImmoSaved(false), 2000);
+    }
+  };
+
+  const feImmo = (n: string) => {
+    const v = parseInt(n);
+    if (isNaN(v)) return "";
+    return new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(v);
+  };
+
+  const totalImmo = (parseInt(immoSci) || 0) + (parseInt(immoLille40) || 0) + (parseInt(immoLille19) || 0);
 
   const exportCsv = async () => {
     const res = await fetch("/api/transactions");
@@ -428,6 +460,61 @@ export default function SettingsPage() {
               </div>
               <p style={{ fontSize: 11, color: "#AEAEB2", marginTop: 12 }}>
                 "Tout reclassifier" écrase les catégories existantes. Utile après avoir ajouté de nouvelles règles.
+              </p>
+            </div>
+          )}
+
+          {section === "patrimoine" && (
+            <div>
+              <div className="section-label mb-2">Patrimoine immobilier</div>
+              <p style={{ fontSize: 12, color: "#86868B", marginBottom: 20 }}>
+                Valeur estimée de chaque bien immobilier. Utilisées pour le calcul du patrimoine net.
+              </p>
+
+              <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 20 }}>
+                {[
+                  { label: "SCI Paris (25%)", sublabel: "Quote-part de la SCI familiale", value: immoSci, setValue: setImmoSci },
+                  { label: "Appartement Lille 40m²", sublabel: "Valeur estimée du bien", value: immoLille40, setValue: setImmoLille40 },
+                  { label: "Appartement Lille 19m²", sublabel: "Valeur estimée du bien", value: immoLille19, setValue: setImmoLille19 },
+                ].map((field) => (
+                  <div key={field.label} style={{ display: "flex", alignItems: "center", gap: 16, padding: "12px 16px", borderRadius: 10, background: "white", border: "1px solid rgba(0,0,0,0.06)" }}>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 13, fontWeight: 500, color: "#1D1D1F" }}>{field.label}</div>
+                      <div style={{ fontSize: 11, color: "#86868B", marginTop: 2 }}>{field.sublabel}</div>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <input
+                        type="number"
+                        value={field.value}
+                        onChange={(e) => field.setValue(e.target.value)}
+                        step={5000}
+                        style={{ width: 110, padding: "6px 10px", borderRadius: 8, border: "1px solid rgba(0,0,0,0.12)", fontSize: 13, textAlign: "right", fontFamily: "monospace" }}
+                      />
+                      <span style={{ fontSize: 12, color: "#86868B", minWidth: 14 }}>€</span>
+                    </div>
+                    <div style={{ fontSize: 12, color: "#86868B", minWidth: 90, textAlign: "right" }}>
+                      {feImmo(field.value)}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Total */}
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 16px", borderRadius: 10, background: "rgba(0,122,255,0.05)", border: "1px solid rgba(0,122,255,0.12)", marginBottom: 16 }}>
+                <span style={{ fontSize: 13, fontWeight: 500, color: "#007AFF" }}>Total immobilier</span>
+                <span style={{ fontSize: 16, fontWeight: 600, color: "#007AFF" }}>
+                  {new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(totalImmo)}
+                </span>
+              </div>
+
+              <button
+                onClick={saveImmo}
+                style={{ padding: "10px 20px", borderRadius: 10, border: "none", background: immoSaved ? "#34C759" : "#007AFF", color: "white", fontSize: 13, fontWeight: 500, cursor: "pointer", transition: "background 200ms" }}
+              >
+                {immoSaved ? "Enregistré ✓" : "Enregistrer"}
+              </button>
+              <p style={{ fontSize: 11, color: "#AEAEB2", marginTop: 10 }}>
+                Ces valeurs sont utilisées dans le Sidebar (patrimoine net) et dans les analyses IA.
               </p>
             </div>
           )}

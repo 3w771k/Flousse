@@ -17,15 +17,24 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   try {
     const db = getDb();
     const { id } = await params;
-    let body: { balance?: number };
+    let body: { actual_balance?: number };
     try {
       body = await req.json();
     } catch {
       return NextResponse.json({ error: "JSON invalide" }, { status: 400 });
     }
-    const { balance } = body;
-    if (balance !== undefined) {
-      db.prepare("UPDATE accounts SET balance = ? WHERE id = ?").run(balance, id);
+
+    const { actual_balance } = body;
+    if (actual_balance !== undefined) {
+      // seed_balance = actual_balance - SUM(transactions)
+      // so that balance = seed_balance + SUM(transactions) = actual_balance
+      const sumRow = db.prepare(
+        "SELECT COALESCE(SUM(amount), 0) as total FROM transactions WHERE account_id = ?"
+      ).get(id) as { total: number };
+      const seedBalance = actual_balance - sumRow.total;
+
+      db.prepare("UPDATE accounts SET balance = ?, seed_balance = ? WHERE id = ?")
+        .run(actual_balance, seedBalance, id);
     }
     return NextResponse.json({ ok: true });
   } catch (err) {

@@ -20,7 +20,7 @@ const CAT_COLORS: Record<string, string> = {
 };
 
 type Transaction = {
-  id: string; account_id: string; date: string; label: string;
+  id: string; account_id: string; date: string; real_date?: string | null; label: string;
   amount: number; category_id: string; confidence: number;
 };
 type Category = { id: string; name: string; type: string; parent_id: string | null };
@@ -139,15 +139,40 @@ export default function TransactionsPage() {
     }
   };
 
-  const refreshAI = async () => {
+  const [aiDate, setAiDate] = useState<string | null>(null);
+
+  // Load cached analysis when month changes
+  useEffect(() => {
+    if (!selectedMonth) return;
+    const [y, m] = selectedMonth.split("-").map(Number);
+    const from = `${y}-${String(m).padStart(2, "0")}-01`;
+    const lastDay = new Date(y, m, 0).getDate();
+    const to = `${y}-${String(m).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
+    fetch(`/api/analyze?tab=transactions&from=${from}&to=${to}`)
+      .then((r) => r.json())
+      .then((d) => { if (d.cached && d.content) { setAiContent(d.content); setAiDate(d.created_at); } else { setAiContent(null); setAiDate(null); } })
+      .catch(() => {});
+  }, [selectedMonth]);
+
+  const refreshAI = async (force = false) => {
     setAiLoading(true);
+    const month = selectedMonth || new Date().toISOString().slice(0, 7);
+    const [y, m] = month.split("-").map(Number);
+    const from = `${y}-${String(m).padStart(2, "0")}-01`;
+    const lastDay = new Date(y, m, 0).getDate();
+    const to = `${y}-${String(m).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
     try {
       const res = await fetch("/api/analyze", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ type: "anomalies" }),
+        body: JSON.stringify({ tab: "transactions", from, to, force }),
       });
       const data = await res.json();
-      setAiContent(res.ok ? (data.content || "Aucun contenu") : (data.message || data.error || "Erreur API"));
+      if (res.ok) {
+        setAiContent(data.content || "Aucun contenu");
+        setAiDate(data.created_at || null);
+      } else {
+        setAiContent(data.message || data.error || "Erreur API");
+      }
     } catch {
       setAiContent("Erreur de connexion");
     }
@@ -247,8 +272,9 @@ export default function TransactionsPage() {
         <AIPanel
           title="Vérifier les classifications"
           content={aiContent || `<p>${unclassified > 0 ? `<strong style="color:#FF9500">${unclassified} transaction${unclassified > 1 ? "s" : ""} non classée${unclassified > 1 ? "s" : ""}</strong> à corriger.` : "Toutes les transactions sont classées."}</p>`}
-          timestamp="données en temps réel"
-          onRefresh={refreshAI}
+          timestamp={aiDate ? new Date(aiDate + "Z").toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" }) : ""}
+          onRefresh={() => refreshAI(false)}
+          onForceRefresh={aiDate ? () => refreshAI(true) : undefined}
           refreshLoading={aiLoading}
         />
       </div>
@@ -275,7 +301,7 @@ export default function TransactionsPage() {
                     {t.label.slice(0, 55)}
                   </div>
                   <div style={{ fontSize: 11, color: "#86868B", marginTop: 2 }}>
-                    {fd(t.date)} · {acct?.bank} — {acct?.name}
+                    {fd(t.real_date || t.date)} · {acct?.bank} — {acct?.name}
                   </div>
                 </div>
                 <div style={{ fontSize: 14, fontWeight: 500, color: t.amount > 0 ? "#34C759" : "#1D1D1F", minWidth: 80, textAlign: "right" }}>

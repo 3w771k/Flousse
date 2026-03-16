@@ -52,8 +52,23 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [aiContent, setAiContent] = useState<string | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
+  const [aiDate, setAiDate] = useState<string | null>(null);
 
   const range = useMemo(() => getDateRange(PERIODS[periodIdx].months), [periodIdx]);
+
+  // Load cached analysis when period changes
+  const loadCachedAnalysis = useCallback(async (from: string, to: string) => {
+    try {
+      const res = await fetch(`/api/analyze?tab=dashboard&from=${from}&to=${to}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.cached && data.content) {
+          setAiContent(data.content);
+          setAiDate(data.created_at);
+        }
+      }
+    } catch { /* silent */ }
+  }, []);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -76,22 +91,28 @@ export default function DashboardPage() {
     setLoading(false);
   }, [range]);
 
-  useEffect(() => { loadData(); }, [loadData]);
-
-  const refreshAI = async () => {
-    setAiLoading(true);
+  useEffect(() => {
+    loadData();
     setAiContent(null);
+    setAiDate(null);
+    loadCachedAnalysis(range.from, range.to);
+  }, [loadData, loadCachedAnalysis, range]);
+
+  const refreshAI = async (force = false) => {
+    setAiLoading(true);
     try {
       const res = await fetch("/api/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tab: "dashboard", from: range.from, to: range.to }),
+        body: JSON.stringify({ tab: "dashboard", from: range.from, to: range.to, force }),
       });
       const data = await res.json();
       if (!res.ok) {
         setAiContent(`<p>${data.message || data.error || "Erreur API"}</p>`);
+        setAiDate(null);
       } else {
         setAiContent(data.content || "<p>Aucun contenu généré.</p>");
+        setAiDate(data.created_at || null);
       }
     } catch {
       setAiContent("<p>Erreur de connexion à l'API.</p>");
@@ -181,10 +202,11 @@ export default function DashboardPage() {
       {/* AI Panel */}
       <div className="mb-6">
         <AIPanel
-          title="Analyse IA"
-          content={aiContent || `<p>Revenus stables à <strong style="color:#1D1D1F">${fek(income)}</strong>. Dépenses courantes à <strong style="color:#1D1D1F">${fek(expense)}</strong>.</p>`}
-          timestamp={aiContent ? "maintenant" : "données calculées"}
-          onRefresh={refreshAI}
+          title="Analyse IA — Dashboard"
+          content={aiContent || `<p style="color:#AEAEB2">Cliquez sur "Générer" pour lancer une analyse complète de la période.</p>`}
+          timestamp={aiDate ? new Date(aiDate + "Z").toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" }) : ""}
+          onRefresh={() => refreshAI(false)}
+          onForceRefresh={aiDate ? () => refreshAI(true) : undefined}
           refreshLoading={aiLoading}
         />
       </div>

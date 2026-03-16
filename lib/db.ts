@@ -90,6 +90,17 @@ function initSchema(db: Database.Database) {
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS analyses (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      tab TEXT NOT NULL,
+      period_from TEXT NOT NULL,
+      period_to TEXT NOT NULL,
+      content TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(tab, period_from, period_to)
+    );
+    CREATE INDEX IF NOT EXISTS idx_analyses_tab_period ON analyses(tab, period_from, period_to);
   `);
 
   // Seed if empty

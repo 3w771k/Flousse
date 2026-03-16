@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import Anthropic from "@anthropic-ai/sdk";
 
-export const maxDuration = 120;
+export const maxDuration = 180;
 
 type ThinkingBlock = { type: "thinking"; thinking: string };
 type TextBlock = { type: "text"; text: string };
@@ -14,198 +14,235 @@ function getApiKey(): string | null {
   return row?.value || process.env.ANTHROPIC_API_KEY || null;
 }
 
-// ─── Context builders ──────────────────────────────────────────────────────────
+// ─── Data extraction ───────────────────────────────────────────────────────────
 
-function buildDashboardContext(from: string, to: string): string {
+function buildFullContext(from: string, to: string) {
   const db = getDb();
 
-  // Period transactions
+  // All transactions for the period
   const txs = db.prepare(`
-    SELECT t.label, t.amount, t.date, t.category_id,
+    SELECT t.id, t.label, t.amount, t.date, t.category_id, t.account_id,
            c.name as cat_name, c.type as cat_type, c.parent_id,
-           p.name as parent_name
+           p.name as parent_name,
+           a.name as account_name, a.bank as account_bank
     FROM transactions t
     JOIN categories c ON c.id = t.category_id
     LEFT JOIN categories p ON p.id = c.parent_id
+    LEFT JOIN accounts a ON a.id = t.account_id
     WHERE t.date BETWEEN ? AND ?
-    ORDER BY t.amount ASC
+    ORDER BY t.date ASC, t.amount ASC
   `).all(from, to) as {
-    label: string; amount: number; date: string; category_id: string;
+    id: string; label: string; amount: number; date: string; category_id: string; account_id: string;
     cat_name: string; cat_type: string; parent_id: string | null; parent_name: string | null;
+    account_name: string; account_bank: string;
   }[];
 
-  // Totals
-  const income = txs.filter(t => t.cat_type === "income").reduce((s, t) => s + t.amount, 0);
-  const expense = txs.filter(t => t.cat_type === "expense").reduce((s, t) => s + Math.abs(t.amount), 0);
-  const debt = txs.filter(t => t.cat_type === "dette").reduce((s, t) => s + Math.abs(t.amount), 0);
-  const net = income - expense - debt;
-
-  // Expenses by parent category
-  const byParent: Record<string, { name: string; total: number; subs: Record<string, number> }> = {};
-  for (const t of txs) {
-    if (t.cat_type !== "expense") continue;
-    const pId = t.parent_id || t.category_id;
-    const pName = t.parent_name || t.cat_name;
-    if (!byParent[pId]) byParent[pId] = { name: pName, total: 0, subs: {} };
-    byParent[pId].total += Math.abs(t.amount);
-    byParent[pId].subs[t.cat_name] = (byParent[pId].subs[t.cat_name] || 0) + Math.abs(t.amount);
-  }
-
-  const catBreakdown = Object.values(byParent)
-    .sort((a, b) => b.total - a.total)
-    .map(({ name, total, subs }) => {
-      const subStr = Object.entries(subs)
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 4)
-        .map(([s, v]) => `    · ${s}: ${v.toFixed(0)}€`)
-        .join("\n");
-      return `  ${name}: ${total.toFixed(0)}€\n${subStr}`;
-    }).join("\n");
-
-  // Top 8 biggest expenses
-  const topExpenses = txs
-    .filter(t => t.cat_type === "expense" && t.amount < 0)
-    .sort((a, b) => a.amount - b.amount)
-    .slice(0, 8)
-    .map(t => `  ${t.date} | ${t.label} | ${t.amount.toFixed(0)}€ | ${t.cat_name}`)
-    .join("\n");
-
-  // Account balances
-  const accounts = db.prepare("SELECT name, bank, balance FROM accounts ORDER BY balance DESC").all() as {
-    name: string; bank: string; balance: number;
+  // Accounts
+  const accounts = db.prepare("SELECT id, name, bank, type, balance FROM accounts ORDER BY balance DESC").all() as {
+    id: string; name: string; bank: string; type: string; balance: number;
   }[];
-  const totalBalance = accounts.reduce((s, a) => s + a.balance, 0);
-  const balanceStr = accounts
-    .map(a => `  ${a.name} (${a.bank}): ${a.balance.toFixed(0)}€`)
-    .join("\n");
 
-  // Budget comparison
+  // Budgets
   const budgets = db.prepare(`
-    SELECT c.id, c.name, c.budget
-    FROM categories c
+    SELECT c.id, c.name, c.budget FROM categories c
     WHERE c.budget IS NOT NULL AND c.parent_id IS NULL
   `).all() as { id: string; name: string; budget: number }[];
 
-  const budgetStr = budgets.map(b => {
-    const actual = byParent[b.id]?.total || 0;
-    const diff = actual - b.budget;
-    const status = diff > 0 ? `⚠️ +${diff.toFixed(0)}€ dépassement` : `✓ -${Math.abs(diff).toFixed(0)}€ sous budget`;
-    return `  ${b.name}: ${actual.toFixed(0)}€ / ${b.budget}€ budget → ${status}`;
-  }).join("\n");
+  // Compute summary
+  const income = txs.filter(t => t.cat_type === "income").reduce((s, t) => s + t.amount, 0);
+  const expense = txs.filter(t => t.cat_type === "expense").reduce((s, t) => s + Math.abs(t.amount), 0);
+  const debt = txs.filter(t => t.cat_type === "dette").reduce((s, t) => s + Math.abs(t.amount), 0);
+  const savings = income - expense - debt;
 
-  // Previous period (same duration)
+  // Number of months in period
   const fromDate = new Date(from);
   const toDate = new Date(to);
-  const durationMs = toDate.getTime() - fromDate.getTime();
-  const prevTo = new Date(fromDate.getTime() - 86400000);
-  const prevFrom = new Date(prevTo.getTime() - durationMs);
-  const prevFromStr = prevFrom.toISOString().slice(0, 10);
-  const prevToStr = prevTo.toISOString().slice(0, 10);
+  const monthsDiff = Math.max(1, (toDate.getFullYear() - fromDate.getFullYear()) * 12 + toDate.getMonth() - fromDate.getMonth() + 1);
 
-  const prevTxs = db.prepare(`
-    SELECT t.amount, c.type as cat_type
-    FROM transactions t
-    JOIN categories c ON c.id = t.category_id
-    WHERE t.date BETWEEN ? AND ?
-  `).all(prevFromStr, prevToStr) as { amount: number; cat_type: string }[];
+  // Format transactions as compact JSON
+  const txJson = txs.map(t => ({
+    date: t.date,
+    label: t.label,
+    amount: t.amount,
+    category: t.cat_name,
+    parent_category: t.parent_name || t.cat_name,
+    type: t.cat_type,
+    account: t.account_name,
+    bank: t.account_bank,
+  }));
 
-  const prevIncome = prevTxs.filter(t => t.cat_type === "income").reduce((s, t) => s + t.amount, 0);
-  const prevExpense = prevTxs.filter(t => t.cat_type === "expense").reduce((s, t) => s + Math.abs(t.amount), 0);
+  // Format accounts
+  const accountsList = accounts.map(a =>
+    `- ${a.name} (${a.bank}, ${a.type}): ${a.balance.toFixed(0)}€`
+  ).join("\n");
 
-  const compareStr = prevTxs.length > 0
-    ? `Revenus: ${prevIncome.toFixed(0)}€ (${income > prevIncome ? "+" : ""}${(income - prevIncome).toFixed(0)}€ vs période actuelle)\nDépenses: ${prevExpense.toFixed(0)}€ (${expense > prevExpense ? "+" : ""}${(expense - prevExpense).toFixed(0)}€ vs période actuelle)`
-    : "Pas de données pour la période précédente";
+  // Budget vs actual
+  const byParent: Record<string, number> = {};
+  for (const t of txs) {
+    if (t.cat_type !== "expense") continue;
+    const pId = t.parent_id || t.category_id;
+    byParent[pId] = (byParent[pId] || 0) + Math.abs(t.amount);
+  }
 
-  return `PÉRIODE : ${from} au ${to}
-Transactions analysées : ${txs.length}
+  const budgetComparison = budgets.map(b => {
+    const actual = byParent[b.id] || 0;
+    return `- ${b.name}: ${actual.toFixed(0)}€ dépensé / ${b.budget}€ budget (${b.budget > 0 ? ((actual / b.budget) * 100).toFixed(0) : "N/A"}%)`;
+  }).join("\n");
 
-RÉSUMÉ FINANCIER :
-  Revenus     : ${income.toFixed(0)}€
-  Dépenses    : ${expense.toFixed(0)}€
-  Crédits     : ${debt.toFixed(0)}€
-  Solde net   : ${net.toFixed(0)}€
-
-SOLDES COMPTES (total : ${totalBalance.toFixed(0)}€) :
-${balanceStr}
-
-DÉPENSES PAR CATÉGORIE :
-${catBreakdown}
-
-BUDGET VS RÉEL :
-${budgetStr || "  Aucun budget défini"}
-
-PLUS GROSSES DÉPENSES :
-${topExpenses || "  Aucune transaction"}
-
-PÉRIODE PRÉCÉDENTE (${prevFromStr} → ${prevToStr}) :
-${compareStr}
-
-CONTEXTE FOYER :
-  - 16 comptes bancaires (Hello Bank, CCF, Amex)
-  - 2 immeubles locatifs à Lille (procédure mise en péril — loyers non perçus ~1 300€/mois)
-  - Crédits immo : 906€/mois + 562€/mois
-  - Prêt personnel : 185€/mois (fin juillet 2028)
-  - 2 filles : Adèle et Gabrielle`;
+  return {
+    from, to, monthsDiff,
+    income, expense, debt, savings,
+    totalBalance: accounts.reduce((s, a) => s + a.balance, 0),
+    accountsList,
+    budgetComparison: budgetComparison || "Aucun budget défini",
+    txJson,
+    txCount: txs.length,
+  };
 }
 
-// ─── Prompt par onglet ─────────────────────────────────────────────────────────
+// ─── System prompt (shared across all tabs) ────────────────────────────────────
 
-const TAB_PROMPTS: Record<string, (context: string) => string> = {
-  dashboard: (ctx) => `Tu es un conseiller financier expert analysant les finances du foyer Wazen.
+const SYSTEM_PROMPT = `You are a financial analysis AI specialized in personal banking transaction analysis.
+Your role is to analyze a user's complete financial situation based on their financial summary and raw banking transactions.
+Your analysis must be data-driven, precise, and structured. Avoid generic advice and base every insight strictly on the data provided.
+The goal is to help the user better understand their financial behavior, identify inefficiencies, detect anomalies, and suggest actionable optimizations.
 
-DONNÉES :
-${ctx}
+USER PROFILE
+Country: France
+Currency: EUR
+Household: 2 adults, 2 children
+Income type: salary
+Risk tolerance: moderate
+Financial goals:
+- increase savings
+- reduce unnecessary expenses
+- improve financial visibility
+- identify spending patterns
 
----
+OUTPUT FORMAT: HTML only (no Markdown). Use <div class="ai-section"> for each section, <div class="ai-section-title"> for section titles, <ul><li> for lists, <strong> for key amounts, <p> for paragraphs.
 
-Génère une analyse financière structurée en HTML avec EXACTEMENT ces 4 sections. Sois direct, précis, cite les chiffres réels. 350-450 mots.
+STYLE GUIDELINES
+- Use precise numbers when possible.
+- Quantify insights and optimization potential.
+- Explain patterns detected in the data.
+- Avoid vague statements.
+- Keep explanations clear and structured.
+- Write in French.`;
 
-<div class="ai-section">
-<div class="ai-section-title">📊 Ce qui s'est passé</div>
-[Synthèse factuelle : revenus, dépenses, solde net. Catégories les plus importantes. Dépassements de budget identifiés. Évolution vs période précédente.]
-</div>
+// ─── Prompts par onglet ────────────────────────────────────────────────────────
 
-<div class="ai-section">
-<div class="ai-section-title">⚠️ Ce que ça implique</div>
-[Lecture financière : tension de trésorerie éventuelle, impact des loyers non perçus sur l'équilibre, risques identifiés, points de vigilance concrets.]
-</div>
+function buildDashboardPrompt(ctx: ReturnType<typeof buildFullContext>): string {
+  return `FINANCIAL SUMMARY
+monthly_income_average: ${(ctx.income / ctx.monthsDiff).toFixed(0)}€
+monthly_expenses_average: ${(ctx.expense / ctx.monthsDiff).toFixed(0)}€
+monthly_savings_average: ${(ctx.savings / ctx.monthsDiff).toFixed(0)}€
+total_income: ${ctx.income.toFixed(0)}€
+total_expenses: ${ctx.expense.toFixed(0)}€
+total_debt_payments: ${ctx.debt.toFixed(0)}€
+net_savings: ${ctx.savings.toFixed(0)}€
+analysis_period_start: ${ctx.from}
+analysis_period_end: ${ctx.to}
+period_months: ${ctx.monthsDiff}
 
-<div class="ai-section">
-<div class="ai-section-title">🎯 Optimisations pour les prochains mois</div>
-[3-4 actions concrètes et actionnables avec montants chiffrés. Priorise les plus impactantes.]
-</div>
+ACCOUNTS (total balance: ${ctx.totalBalance.toFixed(0)}€)
+${ctx.accountsList}
 
-<div class="ai-section">
-<div class="ai-section-title">💰 Capital & ajustements</div>
-[Recommandations : comment utiliser le solde disponible, quels crédits prioriser, constitution d'une réserve de trésorerie, arbitrages à faire.]
-</div>
+BUDGET VS ACTUAL
+${ctx.budgetComparison}
 
-Règles strictes :
-- Utilise <ul><li> pour toutes les listes
-- Mets les montants clés en <strong>
-- Pas de Markdown, uniquement HTML dans les balises ci-dessus
-- Cite les noms de catégories et de comptes réels du contexte`,
-};
+TRANSACTIONS (${ctx.txCount} transactions)
+${JSON.stringify(ctx.txJson, null, 0)}
 
-// ─── Route ────────────────────────────────────────────────────────────────────
+TASK
+Analyze the user's financial situation using the provided data.
+Your analysis must include ALL of the following sections, each as a <div class="ai-section">:
+
+1. <div class="ai-section-title">📋 Synthèse</div>
+Provide a concise executive summary of the user's financial situation for this period. Key numbers, overall health, main takeaway.
+
+2. <div class="ai-section-title">💵 Analyse des revenus</div>
+Identify income sources, reliability, regularity, and any irregular income patterns.
+
+3. <div class="ai-section-title">📊 Ventilation des dépenses</div>
+Analyze spending distribution by category and sub-category. Identify the most significant cost centers. Give percentages and amounts for each. Compare to budget when available.
+
+4. <div class="ai-section-title">🔄 Comportements de dépense</div>
+Detect recurring habits: frequent restaurant spending, impulsive purchases, micro-transactions patterns, weekend vs weekday spending, recurring merchants.
+
+5. <div class="ai-section-title">📱 Audit des abonnements</div>
+Identify all recurring subscriptions and estimate potential unused or redundant services. Quantify total monthly subscription cost.
+
+6. <div class="ai-section-title">📅 Patterns saisonniers</div>
+Identify periods with unusually high spending and possible causes. Week-by-week or day-by-day patterns if visible.
+
+7. <div class="ai-section-title">🔍 Anomalies détectées</div>
+Highlight unusual or exceptional transactions that deviate significantly from normal spending patterns. Flag any suspicious or unexpected amounts.
+
+8. <div class="ai-section-title">🎯 Opportunités d'optimisation</div>
+Estimate how much the user could realistically save by adjusting specific categories. Give concrete numbers: current amount → target → savings potential.
+
+9. <div class="ai-section-title">📈 Projection d'épargne</div>
+Estimate future savings over 6 months and 1 year based on current behavior AND based on optimized behavior.
+
+10. <div class="ai-section-title">🏥 Score de santé financière</div>
+Give a score from 1 to 10 based on:
+- spending discipline
+- savings capacity
+- financial stability
+- predictability of finances
+Explain each sub-score briefly.
+
+11. <div class="ai-section-title">✅ Recommandations prioritaires</div>
+Provide clear and practical recommendations prioritized by financial impact. Each recommendation must include the expected savings or benefit in euros.
+
+IMPORTANT: Be thorough and detailed. Each section must contain substantive analysis based on the actual data. Minimum 1000 words total.`;
+}
+
+// ─── Route GET — récupérer l'analyse en cache ────────────────────────────────
+
+export async function GET(req: NextRequest) {
+  try {
+    const db = getDb();
+    const { searchParams } = new URL(req.url);
+    const tab = searchParams.get("tab");
+    const from = searchParams.get("from");
+    const to = searchParams.get("to");
+
+    if (!tab || !from || !to) {
+      return NextResponse.json({ error: "tab, from, to required" }, { status: 400 });
+    }
+
+    const cached = db.prepare(
+      "SELECT content, created_at FROM analyses WHERE tab = ? AND period_from = ? AND period_to = ? ORDER BY created_at DESC LIMIT 1"
+    ).get(tab, from, to) as { content: string; created_at: string } | undefined;
+
+    if (cached) {
+      return NextResponse.json({ content: cached.content, created_at: cached.created_at, cached: true });
+    }
+
+    return NextResponse.json({ content: null, cached: false });
+  } catch (err) {
+    console.error("[analyze GET]", err);
+    return NextResponse.json({ error: "Erreur" }, { status: 500 });
+  }
+}
+
+// ─── Route POST — générer (ou regénérer) une analyse ─────────────────────────
 
 export async function POST(req: NextRequest) {
   try {
     const apiKey = getApiKey();
     if (!apiKey) return NextResponse.json({ error: "no_api_key" }, { status: 422 });
 
-    let body: { tab: string; from?: string; to?: string };
+    let body: { tab: string; from?: string; to?: string; force?: boolean };
     try {
       body = await req.json();
     } catch {
       return NextResponse.json({ error: "Corps de requête invalide" }, { status: 400 });
     }
 
-    const { tab, from, to } = body;
-
-    if (!TAB_PROMPTS[tab]) {
-      return NextResponse.json({ error: `Onglet inconnu : ${tab}` }, { status: 400 });
-    }
+    const { tab, from, to, force } = body;
+    const db = getDb();
 
     // Default to current month if no period given
     const now = new Date();
@@ -215,23 +252,68 @@ export async function POST(req: NextRequest) {
     const periodFrom = from || defaultFrom;
     const periodTo = to || defaultTo;
 
-    // Build context
-    let context: string;
-    if (tab === "dashboard") context = buildDashboardContext(periodFrom, periodTo);
-    else context = buildDashboardContext(periodFrom, periodTo); // autres onglets à venir
+    // Check cache (unless force refresh)
+    if (!force) {
+      const cached = db.prepare(
+        "SELECT content, created_at FROM analyses WHERE tab = ? AND period_from = ? AND period_to = ? ORDER BY created_at DESC LIMIT 1"
+      ).get(tab, periodFrom, periodTo) as { content: string; created_at: string } | undefined;
 
-    const prompt = TAB_PROMPTS[tab](context);
+      if (cached) {
+        return NextResponse.json({ content: cached.content, created_at: cached.created_at, cached: true });
+      }
+    }
+
+    // Build context and prompt
+    const ctx = buildFullContext(periodFrom, periodTo);
+    let userPrompt: string;
+
+    if (tab === "dashboard") {
+      userPrompt = buildDashboardPrompt(ctx);
+    } else {
+      userPrompt = buildDashboardPrompt(ctx);
+    }
+
+    // Fetch previous period analysis for context continuity
+    const fromDate = new Date(periodFrom);
+    const prevMonth = new Date(fromDate.getFullYear(), fromDate.getMonth() - 1, 1);
+    const prevFrom = prevMonth.toISOString().slice(0, 10);
+    const prevTo = new Date(prevMonth.getFullYear(), prevMonth.getMonth() + 1, 0).toISOString().slice(0, 10);
+
+    const prevAnalysis = db.prepare(
+      "SELECT content, period_from, period_to FROM analyses WHERE tab = ? AND period_from = ? AND period_to = ? ORDER BY created_at DESC LIMIT 1"
+    ).get(tab, prevFrom, prevTo) as { content: string; period_from: string; period_to: string } | undefined;
+
+    // Build messages with optional previous analysis context
+    const messages: { role: "user" | "assistant"; content: string }[] = [];
+
+    if (prevAnalysis) {
+      messages.push({
+        role: "user",
+        content: `Here is the previous period analysis (${prevAnalysis.period_from} to ${prevAnalysis.period_to}) for context and comparison:\n\n${prevAnalysis.content}`,
+      });
+      messages.push({
+        role: "assistant",
+        content: "J'ai bien noté l'analyse de la période précédente. Je vais l'utiliser pour comparer les tendances et identifier les évolutions.",
+      });
+    }
+
+    messages.push({ role: "user", content: userPrompt });
+
+    if (prevAnalysis) {
+      messages[messages.length - 1].content += `\n\nIMPORTANT: You have the previous period analysis above. Reference specific changes and trends compared to last period. Highlight improvements AND regressions.`;
+    }
 
     const client = new Anthropic({ apiKey });
 
     const message = await client.messages.create({
-      model: "claude-sonnet-4-5-20251001",
-      max_tokens: 16000,
+      model: "claude-sonnet-4-6-20250514",
+      max_tokens: 32000,
       thinking: {
         type: "enabled",
-        budget_tokens: 8000,
+        budget_tokens: 16000,
       },
-      messages: [{ role: "user", content: prompt }],
+      system: SYSTEM_PROMPT,
+      messages,
     });
 
     // Extract only text blocks (skip thinking blocks)
@@ -241,7 +323,20 @@ export async function POST(req: NextRequest) {
       .join("")
       .trim();
 
-    return NextResponse.json({ content: html });
+    // Store in DB (upsert)
+    db.prepare(`
+      INSERT INTO analyses (tab, period_from, period_to, content, created_at)
+      VALUES (?, ?, ?, ?, datetime('now'))
+      ON CONFLICT(tab, period_from, period_to) DO UPDATE SET
+        content = excluded.content,
+        created_at = excluded.created_at
+    `).run(tab, periodFrom, periodTo, html);
+
+    const created = db.prepare(
+      "SELECT created_at FROM analyses WHERE tab = ? AND period_from = ? AND period_to = ?"
+    ).get(tab, periodFrom, periodTo) as { created_at: string };
+
+    return NextResponse.json({ content: html, created_at: created.created_at, cached: false });
 
   } catch (err) {
     console.error("[analyze] Error:", err);

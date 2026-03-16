@@ -319,7 +319,7 @@ export async function classifyWithClaude(
   }
 
   // Run batches in parallel with a concurrency limit
-  const allResults: ClassifyResult[] = new Array(batches.length);
+  const allResults: ClassifyResult[][] = new Array(batches.length);
   for (let i = 0; i < batches.length; i += CONCURRENCY) {
     const chunk = batches.slice(i, i + CONCURRENCY);
     const chunkResults = await Promise.all(

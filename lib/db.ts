@@ -8,10 +8,11 @@ let _db: Database.Database | null = null;
 
 export function getDb(): Database.Database {
   if (_db) return _db;
-  _db = new Database(DB_PATH);
-  _db.pragma("journal_mode = WAL");
-  _db.pragma("foreign_keys = ON");
-  initSchema(_db);
+  const db = new Database(DB_PATH);
+  db.pragma("journal_mode = WAL");
+  db.pragma("foreign_keys = ON");
+  initSchema(db);
+  _db = db;
   return _db;
 }
 
@@ -123,10 +124,6 @@ function initSchema(db: Database.Database) {
       )
     `);
   }
-
-  // Add new categories to existing DBs (INSERT OR IGNORE is safe)
-  db.prepare("INSERT OR IGNORE INTO categories (id, name, type, icon, parent_id, budget, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)")
-    .run("retraits", "Retraits esp\u00e8ces", "expense", "\ud83d\udcb5", "finances-admin", null, 114);
 
   // Seed credit metadata for existing DBs (INSERT OR IGNORE is safe)
   const creditSettings = [

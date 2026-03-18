@@ -354,6 +354,64 @@ Explain each scenario's implications. When does the user break even? When do the
 Base all numbers on actual averages from the transaction data.`;
 }
 
+// ─── Budget suggestions prompt (JSON, no HTML, no extended thinking) ─────────
+
+function buildBudgetSuggestionsPrompt(ctx: ReturnType<typeof buildFullContext>): string {
+  return `${buildDataHeader(ctx)}
+
+TASK: Analyze spending data and suggest realistic monthly budgets for each expense category.
+
+For each parent category AND each subcategory with significant spending (>30€/month average), calculate the MEDIAN monthly spending over the analysis period (${ctx.monthsDiff} months). Suggest a budget slightly above the median to allow for variation, but below any outlier months.
+
+CRITICAL: Respond ONLY with a raw JSON array. No text before, no text after, no markdown, no backticks, no code fences.
+Format exactly:
+[{"category_id":"alimentation","suggested_budget":950,"reasoning":"Médiane 920€, pic à 1180€ en décembre. 950€ laisse une marge raisonnable."},{"category_id":"courses","suggested_budget":580,"reasoning":"Médiane 560€ sur 6 mois."}]
+
+Rules:
+- Include ALL parent expense categories that have spending
+- Include subcategories that have significant spending (>30€/month average)
+- Base suggestions on the MEDIAN monthly spending, not the average
+- suggested_budget must be a round number (multiple of 10)
+- reasoning: 1 sentence in French, cite the median and any notable pattern
+- Do NOT suggest budgets for income, transfer, or dette categories
+- Write reasoning in French`;
+}
+
+// ─── Category insight prompt (JSON) ─────────────────────────────────────────
+
+function buildCategoryInsightPrompt(ctx: ReturnType<typeof buildFullContext>, categoryId: string): string {
+  const header = `FINANCIAL DATA
+period: ${ctx.from} → ${ctx.to}
+transactions_count: ${ctx.txCount}
+transactions: ${JSON.stringify(ctx.txJson.filter(t => t.type === "expense"), null, 0)}`;
+
+  const contextBlock = ctx.userContext && ctx.userContext.trim().length > 0
+    ? `\nUSER CONTEXT: ${ctx.userContext.trim()}\n`
+    : "";
+
+  return `${header}
+${contextBlock}
+TASK: Generate 1–2 concise financial insights specifically about the category "${categoryId}" and its subcategories.
+
+Focus on:
+- Spending trends (increasing, decreasing, stable)
+- Notable merchants or patterns
+- Comparison vs budget if available
+- Suggestions for optimization
+
+CRITICAL: Respond ONLY with a raw JSON array. No text before, no text after, no markdown, no backticks, no code fences.
+Format exactly:
+[{"type":"info","title":"...","body":"...","metric":"..."}]
+
+Rules:
+- type must be exactly one of: "alert" | "warning" | "positive" | "info"
+- title: max 50 chars, punchy and specific
+- body: 1–2 sentences, cite actual numbers from data, use <b>amount</b> tags for key figures
+- metric: optional short badge like "+340 €", "-12%", "3 txns" — or null
+- Generate exactly 1–2 insights
+- Write in French`;
+}
+
 // ─── Insights prompts (JSON, no HTML, no extended thinking) ──────────────────
 
 function buildInsightsPrompt(ctx: ReturnType<typeof buildFullContext>, tab: string): string {
@@ -524,6 +582,46 @@ export async function POST(req: NextRequest) {
           content = excluded.content,
           created_at = excluded.created_at
       `).run(tab, periodFrom, periodTo, jsonContent);
+
+      return NextResponse.json({ content: jsonContent, cached: false });
+    }
+
+    // ── Budget suggestions & category insight: fast JSON, no thinking ─────────
+    if (tab === "budget-suggestions" || tab.startsWith("category-insight-")) {
+      const prompt = tab === "budget-suggestions"
+        ? buildBudgetSuggestionsPrompt(ctx)
+        : buildCategoryInsightPrompt(ctx, tab.replace("category-insight-", ""));
+
+      const response = await client.messages.create({
+        model: "claude-sonnet-4-6",
+        max_tokens: 3000,
+        system: "You are a financial analysis AI. You always respond with a raw JSON array only — no markdown, no code fences, no prose whatsoever.",
+        messages: [{ role: "user", content: prompt }],
+      });
+
+      let jsonContent = ((response.content[0] as TextBlock).text || "").trim();
+      jsonContent = jsonContent
+        .replace(/^```json\s*/i, "")
+        .replace(/^```\s*/, "")
+        .replace(/```\s*$/, "")
+        .trim();
+
+      try {
+        JSON.parse(jsonContent);
+      } catch {
+        jsonContent = JSON.stringify([]);
+      }
+
+      // Don't cache budget suggestions (they're always re-generated)
+      if (tab !== "budget-suggestions") {
+        db.prepare(`
+          INSERT INTO analyses (tab, period_from, period_to, content, created_at)
+          VALUES (?, ?, ?, ?, datetime('now'))
+          ON CONFLICT(tab, period_from, period_to) DO UPDATE SET
+            content = excluded.content,
+            created_at = excluded.created_at
+        `).run(tab, periodFrom, periodTo, jsonContent);
+      }
 
       return NextResponse.json({ content: jsonContent, cached: false });
     }

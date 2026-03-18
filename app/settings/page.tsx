@@ -41,6 +41,9 @@ export default function SettingsPage() {
   const [immoSaved, setImmoSaved] = useState(false);
   const [userContext, setUserContext] = useState("");
   const [contextSaved, setContextSaved] = useState(false);
+  const [budgetSuggestions, setBudgetSuggestions] = useState<{ category_id: string; suggested_budget: number; reasoning: string }[]>([]);
+  const [budgetAILoading, setBudgetAILoading] = useState(false);
+  const [budgetAIError, setBudgetAIError] = useState<string | null>(null);
 
   const loadData = useCallback(async () => {
     try {
@@ -189,6 +192,58 @@ export default function SettingsPage() {
     }
   };
 
+  const fetchBudgetSuggestions = async () => {
+    setBudgetAILoading(true);
+    setBudgetAIError(null);
+    setBudgetSuggestions([]);
+    try {
+      const now = new Date();
+      const to = now.toISOString().slice(0, 10);
+      const fromDate = new Date(now.getFullYear(), now.getMonth() - 6, 1);
+      const from = fromDate.toISOString().slice(0, 10);
+      const res = await fetch("/api/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tab: "budget-suggestions", from, to, force: true }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setBudgetAIError(data.message || data.error || "Erreur");
+        return;
+      }
+      const parsed = JSON.parse(data.content);
+      setBudgetSuggestions(parsed);
+    } catch (err) {
+      setBudgetAIError("Erreur lors de l'appel IA");
+      console.error(err);
+    } finally {
+      setBudgetAILoading(false);
+    }
+  };
+
+  const applySuggestion = async (catId: string, budget: number) => {
+    setSavedBudgets((prev) => ({ ...prev, [catId]: budget }));
+    await fetch("/api/categories", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify([{ id: catId, budget }]),
+    });
+    setBudgetSuggestions((prev) => prev.filter((s) => s.category_id !== catId));
+  };
+
+  const applyAllSuggestions = async () => {
+    const updates = budgetSuggestions.map((s) => ({ id: s.category_id, budget: s.suggested_budget }));
+    const newBudgets = { ...savedBudgets };
+    for (const s of budgetSuggestions) newBudgets[s.category_id] = s.suggested_budget;
+    setSavedBudgets(newBudgets);
+    await fetch("/api/categories", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(updates),
+    });
+    setBudgetSuggestions([]);
+  };
+
   const feImmo = (n: string) => {
     const v = parseInt(n);
     if (isNaN(v)) return "";
@@ -297,10 +352,55 @@ export default function SettingsPage() {
             <div>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
                 <div className="section-label">Catégories ({parents.filter((p) => p.type === "expense").length} groupes)</div>
-                <button onClick={saveBudgets} style={{ fontSize: 12, color: budgetSaved ? "#34C759" : "#007AFF", background: "none", border: "none", cursor: "pointer", fontWeight: 500 }}>
-                  {budgetSaved ? "Enregistré ✓" : "Enregistrer"}
-                </button>
+                <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+                  <button
+                    onClick={fetchBudgetSuggestions}
+                    disabled={budgetAILoading}
+                    style={{ fontSize: 12, color: budgetAILoading ? "#AEAEB2" : "#AF52DE", background: "none", border: "none", cursor: budgetAILoading ? "default" : "pointer", fontWeight: 500 }}
+                  >
+                    {budgetAILoading ? "Calcul IA…" : "Calculer les budgets par IA"}
+                  </button>
+                  <button onClick={saveBudgets} style={{ fontSize: 12, color: budgetSaved ? "#34C759" : "#007AFF", background: "none", border: "none", cursor: "pointer", fontWeight: 500 }}>
+                    {budgetSaved ? "Enregistré ✓" : "Enregistrer"}
+                  </button>
+                </div>
               </div>
+              {budgetAIError && (
+                <div style={{ padding: "10px 14px", borderRadius: 10, background: "rgba(255,59,48,0.06)", color: "#FF3B30", fontSize: 12, marginBottom: 16 }}>
+                  {budgetAIError}
+                </div>
+              )}
+
+              {budgetSuggestions.length > 0 && (
+                <div style={{ marginBottom: 20, borderRadius: 12, border: "1px solid rgba(175,82,222,0.15)", background: "rgba(175,82,222,0.04)", overflow: "hidden" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 14px", borderBottom: "1px solid rgba(175,82,222,0.1)" }}>
+                    <span style={{ fontSize: 13, fontWeight: 500, color: "#AF52DE" }}>Suggestions IA ({budgetSuggestions.length})</span>
+                    <button onClick={applyAllSuggestions} style={{ fontSize: 12, color: "#AF52DE", background: "none", border: "none", cursor: "pointer", fontWeight: 600 }}>
+                      Appliquer tout
+                    </button>
+                  </div>
+                  {budgetSuggestions.map((s) => {
+                    const cat = categories.find((c) => c.id === s.category_id);
+                    const current = savedBudgets[s.category_id];
+                    return (
+                      <div key={s.category_id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 14px", borderBottom: "1px solid rgba(0,0,0,0.04)" }}>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontSize: 12, fontWeight: 500, color: "#1D1D1F" }}>{cat?.name || s.category_id}</div>
+                          <div style={{ fontSize: 11, color: "#86868B", marginTop: 2 }}>{s.reasoning}</div>
+                        </div>
+                        <div style={{ textAlign: "right", minWidth: 70 }}>
+                          {current != null && <div style={{ fontSize: 10, color: "#AEAEB2", textDecoration: "line-through" }}>{current} €</div>}
+                          <div style={{ fontSize: 13, fontWeight: 600, color: "#AF52DE" }}>{s.suggested_budget} €</div>
+                        </div>
+                        <button onClick={() => applySuggestion(s.category_id, s.suggested_budget)} style={{ fontSize: 11, color: "#AF52DE", background: "none", border: "1px solid rgba(175,82,222,0.2)", borderRadius: 6, padding: "4px 10px", cursor: "pointer" }}>
+                          Appliquer
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
               {parents.filter((p) => p.type === "expense").map((parent) => {
                 const children = childrenOf(parent.id);
                 return (

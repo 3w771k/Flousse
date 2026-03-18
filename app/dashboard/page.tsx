@@ -18,9 +18,10 @@ const PERIODS: { label: string; months: number }[] = [
 ];
 
 const CAT_COLORS: Record<string, string> = {
-  alimentation: "#34C759", enfants: "#FF9500", "bien-etre": "#5AC8FA",
+  alimentation: "#34C759", enfants: "#FF9500", sante: "#5AC8FA",
   transports: "#AF52DE", voyages: "#007AFF", "shopping-loisirs": "#5856D6",
-  "abonnements-telecom": "#86868B", logement: "#FF9500", "finances-admin": "#AEAEB2", divers: "#AEAEB2",
+  "abonnements-telecom": "#86868B", logement: "#FF9500", "cadeaux-dons": "#FF6482",
+  "finances-admin": "#AEAEB2", divers: "#AEAEB2",
 };
 
 type Transaction = {
@@ -78,10 +79,18 @@ function getDateRange(months: number, offset: number): { from: string; to: strin
 export default function DashboardPage() {
   const [periodIdx, setPeriodIdx] = useState(0);
   const [offset, setOffset] = useState(0);
-  const [expandedCat, setExpandedCat] = useState<string | null>(null);
   const [txs, setTxs] = useState<Transaction[]>([]);
   const [cats, setCats] = useState<Map<string, Category>>(new Map());
   const [loading, setLoading] = useState(true);
+  const [budgetSuggestions, setBudgetSuggestions] = useState<{ category_id: string; suggested_budget: number; reasoning: string }[]>([]);
+  const [budgetAILoading, setBudgetAILoading] = useState(false);
+  // Task 3 — Category explorer
+  const [explorerCatId, setExplorerCatId] = useState<string | null>(null);
+  const [explorerTxs, setExplorerTxs] = useState<Transaction[]>([]);
+  const [explorerHistory, setExplorerHistory] = useState<{ month: string; total: number }[]>([]);
+  const [explorerInsight, setExplorerInsight] = useState<{ type: string; title: string; body: string; metric: string | null }[] | null>(null);
+  const [explorerLoading, setExplorerLoading] = useState(false);
+  const [reclassifyingId, setReclassifyingId] = useState<string | null>(null);
 
   const range = useMemo(() => getDateRange(PERIODS[periodIdx].months, offset), [periodIdx, offset]);
 
@@ -115,6 +124,102 @@ export default function DashboardPage() {
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  const fetchBudgetSuggestions = useCallback(async () => {
+    setBudgetAILoading(true);
+    try {
+      const now = new Date();
+      const to = now.toISOString().slice(0, 10);
+      const fromDate = new Date(now.getFullYear(), now.getMonth() - 6, 1);
+      const from = fromDate.toISOString().slice(0, 10);
+      const res = await fetch("/api/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tab: "budget-suggestions", from, to, force: true }),
+      });
+      const data = await res.json();
+      if (res.ok) setBudgetSuggestions(JSON.parse(data.content));
+    } catch (err) {
+      console.error("Budget AI error", err);
+    } finally {
+      setBudgetAILoading(false);
+    }
+  }, []);
+
+  const applySuggestion = async (catId: string, budget: number) => {
+    await fetch("/api/categories", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify([{ id: catId, budget }]),
+    });
+    setBudgetSuggestions((prev) => prev.filter((s) => s.category_id !== catId));
+    loadData();
+  };
+
+  const applyAllSuggestions = async () => {
+    const updates = budgetSuggestions.map((s) => ({ id: s.category_id, budget: s.suggested_budget }));
+    await fetch("/api/categories", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(updates),
+    });
+    setBudgetSuggestions([]);
+    loadData();
+  };
+
+  const openExplorer = useCallback(async (catId: string) => {
+    setExplorerCatId(catId);
+    setExplorerLoading(true);
+    setExplorerInsight(null);
+    setExplorerTxs([]);
+    setExplorerHistory([]);
+
+    // Fetch transactions for this category in current period
+    const txRes = await fetch(`/api/transactions?from=${range.from}&to=${range.to}&category=${catId}`);
+    if (txRes.ok) setExplorerTxs(await txRes.json());
+
+    // Fetch 6-month history
+    const now = new Date();
+    const historyData: { month: string; total: number }[] = [];
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const mFrom = d.toISOString().slice(0, 10);
+      const mTo = new Date(d.getFullYear(), d.getMonth() + 1, 0).toISOString().slice(0, 10);
+      const mRes = await fetch(`/api/transactions?from=${mFrom}&to=${mTo}&category=${catId}`);
+      if (mRes.ok) {
+        const mTxs: Transaction[] = await mRes.json();
+        const total = mTxs.reduce((s, t) => s + Math.abs(t.amount), 0);
+        historyData.push({ month: d.toLocaleDateString("fr-FR", { month: "short" }), total });
+      }
+    }
+    setExplorerHistory(historyData);
+    setExplorerLoading(false);
+
+    // Fetch AI insight (non-blocking)
+    try {
+      const insRes = await fetch("/api/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tab: `category-insight-${catId}`, from: range.from, to: range.to }),
+      });
+      if (insRes.ok) {
+        const insData = await insRes.json();
+        setExplorerInsight(JSON.parse(insData.content));
+      }
+    } catch { /* ignore */ }
+  }, [range]);
+
+  const reclassifyTransaction = async (txId: string, newCatId: string) => {
+    setReclassifyingId(txId);
+    await fetch(`/api/transactions/${txId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ categoryId: newCatId }),
+    });
+    setExplorerTxs((prev) => prev.filter((t) => t.id !== txId));
+    setReclassifyingId(null);
+    loadData();
+  };
 
   // Compute stats
   let income = 0, expense = 0, debt = 0;
@@ -229,26 +334,57 @@ export default function DashboardPage() {
       <div style={{ display: "grid", gridTemplateColumns: "1fr 280px", gap: 16 }}>
         {/* Category breakdown */}
         <div className="rounded-apple" style={{ background: "#F5F5F7", padding: "20px 24px" }}>
-          <div className="section-label mb-4">Dépenses par catégorie</div>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }} className="mb-4">
+            <div className="section-label">Dépenses par catégorie</div>
+            <button
+              onClick={fetchBudgetSuggestions}
+              disabled={budgetAILoading}
+              style={{ fontSize: 11, color: budgetAILoading ? "#AEAEB2" : "#AF52DE", background: "none", border: "none", cursor: budgetAILoading ? "default" : "pointer", fontWeight: 500 }}
+            >
+              {budgetAILoading ? "Calcul IA…" : "Budgets par IA"}
+            </button>
+          </div>
+
+          {budgetSuggestions.length > 0 && (
+            <div style={{ marginBottom: 16, borderRadius: 10, border: "1px solid rgba(175,82,222,0.15)", background: "rgba(175,82,222,0.04)", overflow: "hidden" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", borderBottom: "1px solid rgba(175,82,222,0.1)" }}>
+                <span style={{ fontSize: 12, fontWeight: 500, color: "#AF52DE" }}>Suggestions IA</span>
+                <button onClick={applyAllSuggestions} style={{ fontSize: 11, color: "#AF52DE", background: "none", border: "none", cursor: "pointer", fontWeight: 600 }}>
+                  Appliquer tout
+                </button>
+              </div>
+              {budgetSuggestions.map((s) => {
+                const cat = cats.get(s.category_id);
+                return (
+                  <div key={s.category_id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 14px", borderBottom: "1px solid rgba(0,0,0,0.04)" }}>
+                    <div style={{ flex: 1 }}>
+                      <span style={{ fontSize: 12, color: "#1D1D1F" }}>{cat?.name || s.category_id}</span>
+                      <span style={{ fontSize: 10, color: "#86868B", marginLeft: 6 }}>{s.reasoning}</span>
+                    </div>
+                    <span style={{ fontSize: 12, fontWeight: 600, color: "#AF52DE" }}>{s.suggested_budget} €</span>
+                    <button onClick={() => applySuggestion(s.category_id, s.suggested_budget)} style={{ fontSize: 10, color: "#AF52DE", background: "none", border: "1px solid rgba(175,82,222,0.2)", borderRadius: 5, padding: "2px 8px", cursor: "pointer" }}>
+                      OK
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
           {topParents.map(({ cat, total, subs }) => {
             const budget = cat!.budget ? cat!.budget * months : null;
             const pct = budget ? Math.min((total / budget) * 100, 120) : null;
             const color = CAT_COLORS[cat!.id] || "#AEAEB2";
             const overBudget = pct != null && pct > 100;
-            const isExpanded = expandedCat === cat!.id;
-            const subEntries = Object.entries(subs).sort((a, b) => b[1] - a[1]);
-
             return (
               <div key={cat!.id}>
                 <button
-                  onClick={() => setExpandedCat(isExpanded ? null : cat!.id)}
+                  onClick={() => openExplorer(cat!.id)}
                   className="cat-row w-full text-left"
                 >
                   <div style={{ width: 8, height: 8, borderRadius: "50%", background: color, flexShrink: 0 }} />
                   <span style={{ flex: 1, fontSize: 14, color: "#1D1D1F" }}>{cat!.name}</span>
-                  {subEntries.length > 0 && (
-                    <span style={{ fontSize: 10, color: "#AEAEB2" }}>{isExpanded ? "▲" : "▼"}</span>
-                  )}
+                  <span style={{ fontSize: 10, color: "#AEAEB2" }}>›</span>
                   <div style={{ textAlign: "right" }}>
                     <span style={{ fontSize: 16, fontWeight: 500, color: overBudget ? "#FF3B30" : "#1D1D1F" }}>{fe(total)}</span>
                     {budget != null && <span style={{ fontSize: 11, color: overBudget ? "#FF3B30" : "#86868B", display: "block" }}>/{fe(budget)}</span>}
@@ -265,20 +401,7 @@ export default function DashboardPage() {
                   </div>
                 )}
 
-                {isExpanded && subEntries.map(([subId, subTotal]) => {
-                  const sub = cats.get(subId);
-                  if (!sub) return null;
-                  return (
-                    <div key={subId} style={{ display: "flex", alignItems: "center", gap: 12, padding: "6px 0 6px 20px", borderBottom: "1px solid rgba(0,0,0,0.03)" }}>
-                      <div style={{ width: 6, height: 6, borderRadius: "50%", background: color, opacity: 0.5, flexShrink: 0 }} />
-                      <span style={{ flex: 1, fontSize: 12, color: "#86868B" }}>{sub.name}</span>
-                      <span style={{ fontSize: 13, fontWeight: 500, color: "#1D1D1F" }}>{fe(subTotal)}</span>
-                      <span style={{ fontSize: 11, color: "#AEAEB2", minWidth: 32, textAlign: "right" }}>
-                        {Math.round((subTotal / total) * 100)} %
-                      </span>
-                    </div>
-                  );
-                })}
+                {/* Subcategory details now shown in explorer slide-over */}
               </div>
             );
           })}
@@ -304,6 +427,126 @@ export default function DashboardPage() {
           </div>
         </div>
       </div>
+
+      {/* Task 3 — Category Explorer slide-over */}
+      {explorerCatId && (() => {
+        const eCat = cats.get(explorerCatId);
+        const color = CAT_COLORS[explorerCatId] || "#AEAEB2";
+        const eSubEntries = Object.entries(bySub[explorerCatId] || {}).sort((a, b) => b[1] - a[1]);
+        const eTotal = byParent[explorerCatId] || 0;
+        const histMax = Math.max(...explorerHistory.map(h => h.total), 1);
+        const allCats = Array.from(cats.values()).filter(c => c.type === "expense");
+
+        return (
+          <div style={{ position: "fixed", inset: 0, zIndex: 100, display: "flex", justifyContent: "flex-end" }}>
+            <div onClick={() => setExplorerCatId(null)} style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.3)", backdropFilter: "blur(2px)" }} />
+            <div style={{ position: "relative", width: 440, maxWidth: "90vw", background: "#F5F5F7", overflowY: "auto", boxShadow: "-4px 0 24px rgba(0,0,0,0.12)" }}>
+              <div style={{ padding: "20px 24px" }}>
+                {/* Header */}
+                <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 20 }}>
+                  <button onClick={() => setExplorerCatId(null)} style={{ background: "none", border: "none", fontSize: 18, color: "#86868B", cursor: "pointer", padding: 0 }}>✕</button>
+                  <div style={{ width: 10, height: 10, borderRadius: "50%", background: color }} />
+                  <h2 style={{ fontSize: 20, fontWeight: 600, color: "#1D1D1F", margin: 0 }}>{eCat?.name || explorerCatId}</h2>
+                  <span style={{ fontSize: 18, fontWeight: 600, color: "#1D1D1F", marginLeft: "auto" }}>{fe(eTotal)}</span>
+                </div>
+
+                {explorerLoading && <div style={{ padding: 20, textAlign: "center", color: "#86868B", fontSize: 13 }}>Chargement…</div>}
+
+                {/* Subcategory breakdown */}
+                {eSubEntries.length > 0 && (
+                  <div style={{ marginBottom: 20, borderRadius: 12, background: "white", padding: "16px 18px", border: "1px solid rgba(0,0,0,0.06)" }}>
+                    <div style={{ fontSize: 12, fontWeight: 500, color: "#86868B", marginBottom: 12 }}>Sous-catégories</div>
+                    {eSubEntries.map(([subId, subTotal]) => {
+                      const sub = cats.get(subId);
+                      const pct = eTotal > 0 ? (subTotal / eTotal) * 100 : 0;
+                      return (
+                        <div key={subId} style={{ marginBottom: 8 }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 3 }}>
+                            <span style={{ fontSize: 12, color: "#1D1D1F" }}>{sub?.name || subId}</span>
+                            <span style={{ fontSize: 12, fontWeight: 500, color: "#1D1D1F" }}>{fe(subTotal)} <span style={{ color: "#AEAEB2", fontWeight: 400 }}>{Math.round(pct)}%</span></span>
+                          </div>
+                          <div style={{ height: 4, background: "rgba(0,0,0,0.04)", borderRadius: 2 }}>
+                            <div style={{ height: 4, borderRadius: 2, width: `${pct}%`, background: color, opacity: 0.7, transition: "width 300ms" }} />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* 6-month evolution */}
+                {explorerHistory.length > 0 && (
+                  <div style={{ marginBottom: 20, borderRadius: 12, background: "white", padding: "16px 18px", border: "1px solid rgba(0,0,0,0.06)" }}>
+                    <div style={{ fontSize: 12, fontWeight: 500, color: "#86868B", marginBottom: 12 }}>Évolution 6 mois</div>
+                    <div style={{ display: "flex", alignItems: "flex-end", gap: 6, height: 80 }}>
+                      {explorerHistory.map((h, i) => (
+                        <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
+                          <span style={{ fontSize: 9, color: "#86868B" }}>{h.total > 0 ? fe(h.total) : ""}</span>
+                          <div style={{
+                            width: "100%", borderRadius: 3, background: color, opacity: 0.6,
+                            height: `${Math.max((h.total / histMax) * 60, 2)}px`,
+                            transition: "height 300ms",
+                          }} />
+                          <span style={{ fontSize: 9, color: "#AEAEB2" }}>{h.month}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* AI Insight */}
+                {explorerInsight && explorerInsight.length > 0 && (
+                  <div style={{ marginBottom: 20 }}>
+                    {explorerInsight.map((ins, i) => {
+                      const insColor = ins.type === "alert" ? "#FF3B30" : ins.type === "warning" ? "#FF9500" : ins.type === "positive" ? "#34C759" : "#007AFF";
+                      return (
+                        <div key={i} style={{ borderRadius: 12, background: "white", padding: "12px 16px", border: `1px solid ${insColor}22`, marginBottom: 8 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                            <span style={{ fontSize: 12, fontWeight: 600, color: insColor }}>{ins.title}</span>
+                            {ins.metric && <span style={{ fontSize: 10, background: `${insColor}15`, color: insColor, padding: "1px 6px", borderRadius: 4 }}>{ins.metric}</span>}
+                          </div>
+                          <div style={{ fontSize: 12, color: "#86868B", lineHeight: 1.4 }} dangerouslySetInnerHTML={{ __html: ins.body }} />
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* Transaction list */}
+                {explorerTxs.length > 0 && (
+                  <div style={{ borderRadius: 12, background: "white", padding: "16px 18px", border: "1px solid rgba(0,0,0,0.06)" }}>
+                    <div style={{ fontSize: 12, fontWeight: 500, color: "#86868B", marginBottom: 12 }}>Transactions ({explorerTxs.length})</div>
+                    {explorerTxs.slice(0, 50).map((t) => (
+                      <div key={t.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0", borderBottom: "1px solid rgba(0,0,0,0.04)" }}>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontSize: 12, color: "#1D1D1F", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 200 }}>{t.label}</div>
+                          <div style={{ fontSize: 10, color: "#AEAEB2" }}>{t.date}</div>
+                        </div>
+                        <span style={{ fontSize: 13, fontWeight: 500, color: "#1D1D1F", minWidth: 60, textAlign: "right" }}>{fe(Math.abs(t.amount))}</span>
+                        <select
+                          value={t.category_id}
+                          onChange={(e) => reclassifyTransaction(t.id, e.target.value)}
+                          disabled={reclassifyingId === t.id}
+                          style={{ fontSize: 10, padding: "2px 4px", borderRadius: 4, border: "1px solid rgba(0,0,0,0.1)", color: "#86868B", maxWidth: 90, background: "white" }}
+                        >
+                          {allCats.map((c) => (
+                            <option key={c.id} value={c.id}>{c.name}</option>
+                          ))}
+                        </select>
+                      </div>
+                    ))}
+                    {explorerTxs.length > 50 && (
+                      <div style={{ fontSize: 11, color: "#AEAEB2", textAlign: "center", padding: "8px 0" }}>
+                        … et {explorerTxs.length - 50} autres
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }

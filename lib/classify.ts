@@ -33,6 +33,11 @@ interface BuiltinRule {
 // Rules are evaluated top-to-bottom; first match wins.
 // More specific rules (with amount/regex conditions) should come before generic ones.
 const BUILTIN_RULES: BuiltinRule[] = [
+  // ── Boulangerie (before generic courses) ──
+  { pattern: "FOURNIL", categoryId: "boulangerie" },
+  { pattern: "BOULANGERIE", categoryId: "boulangerie" },
+  { pattern: "GRAIN D.OR", categoryId: "boulangerie", regex: true },
+
   // ── Courses (groceries) ──
   { pattern: "CARREFOURMARKET", categoryId: "courses" },
   { pattern: "MON-MARCHE", categoryId: "courses" },
@@ -41,8 +46,6 @@ const BUILTIN_RULES: BuiltinRule[] = [
   { pattern: "POINT CENTRAL", categoryId: "courses" },
   { pattern: "BOUCHERIE BAGATE", categoryId: "courses" },
   { pattern: "FERME DE WIND", categoryId: "courses" },
-  { pattern: "GRAIN D.OR", categoryId: "courses", regex: true },
-  { pattern: "FOURNIL", categoryId: "courses" },
   { pattern: "HELLOFRESH", categoryId: "courses" },
   { pattern: "INTERCAVES", categoryId: "courses" },
   { pattern: "GOURMAND CROQUANT", categoryId: "courses" },
@@ -55,7 +58,11 @@ const BUILTIN_RULES: BuiltinRule[] = [
   { pattern: "BIOCOOP", categoryId: "courses" },
   { pattern: "NATURALIA", categoryId: "courses" },
   { pattern: "GRAND FRAIS", categoryId: "courses" },
-  { pattern: "BOULANGERIE", categoryId: "courses" },
+  { pattern: "FRANPRIX", categoryId: "courses" },
+
+  // ── Snacking & distributeurs ──
+  { pattern: "DISTRIBUTEUR", categoryId: "snacking" },
+  { pattern: "AUTOMATE", categoryId: "snacking" },
 
   // ── Restaurants ──
   { pattern: "WAZI", categoryId: "resto" },
@@ -78,22 +85,30 @@ const BUILTIN_RULES: BuiltinRule[] = [
   { pattern: "URSSAF.*CNCESU", categoryId: "garde", regex: true },
   { pattern: "CNCESU", categoryId: "garde" },
 
-  // ── Voiture / stationnement (SHELL EV before generic SHELL) ──
-  { pattern: "IZIVIA", categoryId: "voiture" },
-  { pattern: "CHARGEMAP", categoryId: "voiture" },
-  { pattern: "SHELL EV", categoryId: "voiture" },
-  { pattern: "TESLA", categoryId: "voiture" },
-  { pattern: "FASTNED", categoryId: "voiture" },
-  { pattern: "IONITY", categoryId: "voiture" },
-  { pattern: "BIPANDGO", categoryId: "voiture" },
-  { pattern: "INDIGO", categoryId: "voiture" },
-  { pattern: "SAEMES", categoryId: "voiture" },
-  { pattern: "EASYPARK", categoryId: "voiture" },
-  { pattern: "STATTELPAYBYPHO", categoryId: "voiture" },
-  { pattern: "TOTAL ENERGIES", categoryId: "voiture" },
-  { pattern: "SHELL", categoryId: "voiture" },
-  { pattern: "PARKING", categoryId: "voiture" },
-  { pattern: "AUTOROUTE", categoryId: "voiture" },
+  // ── Voiture : recharge électrique (SHELL EV before generic SHELL) ──
+  { pattern: "IZIVIA", categoryId: "voiture-recharge" },
+  { pattern: "CHARGEMAP", categoryId: "voiture-recharge" },
+  { pattern: "SHELL EV", categoryId: "voiture-recharge" },
+  { pattern: "TESLA", categoryId: "voiture-recharge" },
+  { pattern: "FASTNED", categoryId: "voiture-recharge" },
+  { pattern: "IONITY", categoryId: "voiture-recharge" },
+
+  // ── Voiture : péage ──
+  { pattern: "BIPANDGO", categoryId: "voiture-peage" },
+  { pattern: "AUTOROUTE", categoryId: "voiture-peage" },
+
+  // ── Voiture : parking ──
+  { pattern: "INDIGO", categoryId: "voiture-parking" },
+  { pattern: "SAEMES", categoryId: "voiture-parking" },
+  { pattern: "EASYPARK", categoryId: "voiture-parking" },
+  { pattern: "STATTELPAYBYPHO", categoryId: "voiture-parking" },
+  { pattern: "PARKING", categoryId: "voiture-parking" },
+
+  // ── Voiture : carburant & entretien ──
+  { pattern: "TOTAL ENERGIES", categoryId: "voiture-carburant" },
+  { pattern: "TOTAL", categoryId: "voiture-carburant" },
+  { pattern: "SHELL", categoryId: "voiture-carburant" },
+  { pattern: "ESSO", categoryId: "voiture-carburant" },
 
   // ── Taxi ──
   { pattern: "G7", categoryId: "taxi" },
@@ -115,7 +130,7 @@ const BUILTIN_RULES: BuiltinRule[] = [
   // ── Allocations / impôts (sign-dependent: positive = revenu, negative = impots) ──
   { pattern: "CAF DES HAUTS", categoryId: "allocations", minAmount: 0 },
   { pattern: "D.G.F.I.P.*IMPOT", categoryId: "autre-revenu", minAmount: 0, regex: true },
-  { pattern: "D.G.F.I.P.*IMPOT", categoryId: "impots", maxAmount: 0, regex: true },
+  { pattern: "D.G.F.I.P.*IMPOT", categoryId: "impots-ir", maxAmount: 0, regex: true },
 
   // ── Crédits / prêts (specific loan numbers before generic ECHEANCE PRET) ──
   { pattern: "ECHEANCE PRET.*61123486", categoryId: "credit-immo", regex: true },
@@ -141,37 +156,73 @@ const BUILTIN_RULES: BuiltinRule[] = [
   { pattern: "INTERETS.*DEBITEURS", categoryId: "frais-bancaires", regex: true },
   { pattern: "MINIMUM FORFAITAIRE", categoryId: "frais-bancaires" },
 
-  // ── Abonnements / assurances ──
-  { pattern: "SEONI", categoryId: "abonnements" },
+  // ── Streaming & apps ──
+  { pattern: "SEONI", categoryId: "streaming" },
+  { pattern: "NETFLIX", categoryId: "streaming" },
+  { pattern: "SPOTIFY", categoryId: "streaming" },
+  { pattern: "DISNEY PLUS", categoryId: "streaming" },
+  { pattern: "CANAL+", categoryId: "streaming" },
+  { pattern: "CANAL PLUS", categoryId: "streaming" },
+  { pattern: "APPLE.COM/BILL", categoryId: "streaming" },
+  { pattern: "ADOBE", categoryId: "streaming" },
+  { pattern: "MICROSOFT", categoryId: "streaming" },
+  { pattern: "GOOGLE STORAGE", categoryId: "streaming" },
+  { pattern: "AMAZON PRIME", categoryId: "streaming" },
+
+  // ── Assurances ──
   { pattern: "CARDIF IARD", categoryId: "assurance" },
   { pattern: "SPB.*ASSURANCE", categoryId: "assurance", regex: true },
-  { pattern: "NETFLIX", categoryId: "abonnements" },
-  { pattern: "SPOTIFY", categoryId: "abonnements" },
-  { pattern: "DISNEY PLUS", categoryId: "abonnements" },
-  { pattern: "CANAL+", categoryId: "abonnements" },
-  { pattern: "CANAL PLUS", categoryId: "abonnements" },
-  { pattern: "APPLE.COM/BILL", categoryId: "abonnements" },
-  { pattern: "ADOBE", categoryId: "abonnements" },
-  { pattern: "MICROSOFT", categoryId: "abonnements" },
-  { pattern: "GOOGLE STORAGE", categoryId: "abonnements" },
-  { pattern: "AMAZON PRIME", categoryId: "abonnements" },
 
-  // ── Impôts / amendes ──
-  { pattern: "WEB AMENDE", categoryId: "impots" },
-  { pattern: "AMENDE", categoryId: "impots" },
-  { pattern: "TIMBRE FISCAL", categoryId: "impots" },
+  // ── Amendes & PV ──
+  { pattern: "WEB AMENDE", categoryId: "amendes" },
+  { pattern: "AMENDE", categoryId: "amendes" },
 
-  // ── Shopping (AMAZON PRIME already matched above) ──
-  { pattern: "AMAZON", categoryId: "shopping" },
-  { pattern: "FNAC", categoryId: "shopping" },
-  { pattern: "DARTY", categoryId: "shopping" },
-  { pattern: "IKEA", categoryId: "shopping" },
-  { pattern: "ZARA", categoryId: "shopping" },
-  { pattern: "H&M", categoryId: "shopping" },
-  { pattern: "UNIQLO", categoryId: "shopping" },
-  { pattern: "DECATHLON", categoryId: "shopping" },
-  { pattern: "LEROY MERLIN", categoryId: "shopping" },
-  { pattern: "CASTORAMA", categoryId: "shopping" },
+  // ── Taxes ──
+  { pattern: "TAXE FONCIERE", categoryId: "taxe-fonciere" },
+  { pattern: "TIMBRE FISCAL", categoryId: "autres-taxes" },
+
+  // ── Santé : médecin ──
+  { pattern: "DR STRUK", categoryId: "medecin" },
+  { pattern: "DR VILLAIN", categoryId: "medecin" },
+  { pattern: "MEDECIN", categoryId: "medecin" },
+  { pattern: "DOCTEUR", categoryId: "medecin" },
+  { pattern: "LABO", categoryId: "medecin" },
+
+  // ── Santé : pharmacie ──
+  { pattern: "MY PHARMA", categoryId: "pharmacie" },
+  { pattern: "PHARMACIE", categoryId: "pharmacie" },
+
+  // ── Santé : spa ──
+  { pattern: "SPA", categoryId: "spa" },
+  { pattern: "HAMMAM", categoryId: "spa" },
+  { pattern: "MASSAGE", categoryId: "spa" },
+
+  // ── Remboursements santé ──
+  { pattern: "CPAM", categoryId: "remboursements" },
+  { pattern: "AMELI", categoryId: "remboursements" },
+
+  // ── Cadeaux & dons ──
+  { pattern: "CADEAU", categoryId: "cadeaux" },
+  { pattern: "LEETCHI", categoryId: "cadeaux" },
+  { pattern: "MGP", categoryId: "cadeaux" },
+  { pattern: "EGLISE", categoryId: "dons" },
+  { pattern: "CHARITE", categoryId: "dons" },
+
+  // ── Vêtements ──
+  { pattern: "ZARA", categoryId: "vetements" },
+  { pattern: "H&M", categoryId: "vetements" },
+  { pattern: "UNIQLO", categoryId: "vetements" },
+
+  // ── Maison & déco (AMAZON PRIME already matched above) ──
+  { pattern: "AMAZON", categoryId: "maison-deco" },
+  { pattern: "FNAC", categoryId: "maison-deco" },
+  { pattern: "DARTY", categoryId: "maison-deco" },
+  { pattern: "IKEA", categoryId: "maison-deco" },
+  { pattern: "LEROY MERLIN", categoryId: "maison-deco" },
+  { pattern: "CASTORAMA", categoryId: "maison-deco" },
+
+  // ── Sport ──
+  { pattern: "DECATHLON", categoryId: "sport" },
 
   // ── Livraison ──
   { pattern: "DELIVEROO", categoryId: "livraison" },
@@ -189,17 +240,11 @@ const BUILTIN_RULES: BuiltinRule[] = [
   { pattern: "FREE MOBILE", categoryId: "telecom" },
   { pattern: "ORANGE", categoryId: "telecom" },
 
-  // ── Santé ──
-  { pattern: "PHARMACIE", categoryId: "sante" },
-  { pattern: "DOCTEUR", categoryId: "sante" },
-  { pattern: "CPAM", categoryId: "sante" },
-  { pattern: "AMELI", categoryId: "sante" },
-
-  // ── Logement ──
+  // ── Logement (énergie) ──
   { pattern: "EDF", categoryId: "logement" },
   { pattern: "ENGIE", categoryId: "logement" },
 
-  // ── Divers (DAB withdrawals) ──
+  // ── Retraits DAB ──
   { pattern: "RETRAIT DAB", categoryId: "retraits" },
   { pattern: "RET DAB", categoryId: "retraits" },
 
@@ -374,10 +419,18 @@ Catégories :
 ${catTree}
 
 RÈGLES STRICTES :
-- AMAZON/FNAC/DARTY/IKEA → shopping
-- NETFLIX/SPOTIFY/ADOBE/CANAL+ → abonnements
+- AMAZON/FNAC/DARTY/IKEA → maison-deco
+- ZARA/H&M/UNIQLO → vetements
+- NETFLIX/SPOTIFY/ADOBE/CANAL+ → streaming
 - CARREFOUR/MONOPRIX/FRANPRIX/PICARD → courses
+- BOULANGERIE/FOURNIL → boulangerie
 - DELIVEROO/UBER EATS → livraison
+- IZIVIA/SHELL EV/TESLA/IONITY → voiture-recharge
+- SAEMES/INDIGO/EASYPARK/PARKING → voiture-parking
+- BIPANDGO/AUTOROUTE → voiture-peage
+- SHELL/TOTAL/ESSO → voiture-carburant
+- PHARMACIE → pharmacie, DOCTEUR/MEDECIN → medecin
+- CPAM/AMELI → remboursements (revenu)
 - Montant positif = revenu (sous "revenus")
 - Montant négatif = dépense
 - Si aucune sous-cat existante ne convient, crée-en une via "newCategory"

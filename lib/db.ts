@@ -146,6 +146,39 @@ function initSchema(db: Database.Database) {
   const insertCreditSetting = db.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)");
   for (const s of creditSettings) insertCreditSetting.run(s.key, s.value);
 
+  // ── Category arborescence v2 migration ──
+  const oldCatV1 = db.prepare("SELECT id FROM categories WHERE id = 'bien-etre'").get();
+  if (oldCatV1) {
+    db.pragma("foreign_keys = OFF");
+    db.transaction(() => {
+      // Voiture split (specific labels first, then default to recharge)
+      db.exec(`UPDATE transactions SET category_id = 'voiture-parking' WHERE category_id = 'voiture' AND (UPPER(label) LIKE '%PARKING%' OR UPPER(label) LIKE '%SAEMES%' OR UPPER(label) LIKE '%INDIGO%' OR UPPER(label) LIKE '%EASYPARK%' OR UPPER(label) LIKE '%STATIONNEMENT%')`);
+      db.exec(`UPDATE transactions SET category_id = 'voiture-peage' WHERE category_id = 'voiture' AND (UPPER(label) LIKE '%BIPANDGO%' OR UPPER(label) LIKE '%PEAGE%' OR UPPER(label) LIKE '%AUTOROUTE%')`);
+      db.exec(`UPDATE transactions SET category_id = 'voiture-carburant' WHERE category_id = 'voiture' AND (UPPER(label) LIKE '%ESSO%' OR UPPER(label) LIKE '%CARBURANT%' OR UPPER(label) LIKE '%TOTAL%' OR (UPPER(label) LIKE '%SHELL%' AND UPPER(label) NOT LIKE '%SHELL EV%'))`);
+      db.exec("UPDATE transactions SET category_id = 'voiture-recharge' WHERE category_id = 'voiture'");
+      // Renamed category IDs
+      db.exec("UPDATE transactions SET category_id = 'esthetique' WHERE category_id = 'coiffeur'");
+      db.exec("UPDATE transactions SET category_id = 'pharmacie' WHERE category_id = 'sante'");
+      db.exec("UPDATE transactions SET category_id = 'streaming' WHERE category_id = 'abonnements'");
+      db.exec("UPDATE transactions SET category_id = 'maison-deco' WHERE category_id = 'shopping'");
+      db.exec("UPDATE transactions SET category_id = 'impots-ir' WHERE category_id = 'impots'");
+      // Rules table
+      db.exec("UPDATE rules SET category_id = 'esthetique' WHERE category_id = 'coiffeur'");
+      db.exec("UPDATE rules SET category_id = 'pharmacie' WHERE category_id = 'sante'");
+      db.exec("UPDATE rules SET category_id = 'streaming' WHERE category_id = 'abonnements'");
+      db.exec("UPDATE rules SET category_id = 'maison-deco' WHERE category_id = 'shopping'");
+      db.exec("UPDATE rules SET category_id = 'impots-ir' WHERE category_id = 'impots'");
+      db.exec("UPDATE rules SET category_id = 'voiture-recharge' WHERE category_id = 'voiture'");
+      // Rebuild categories from scratch
+      db.exec("DELETE FROM categories");
+    })();
+    seedDb(db);
+    // Fix any orphaned references (e.g. Claude-created subcategories)
+    db.exec("UPDATE transactions SET category_id = 'divers' WHERE category_id NOT IN (SELECT id FROM categories)");
+    db.exec("DELETE FROM rules WHERE category_id NOT IN (SELECT id FROM categories)");
+    db.pragma("foreign_keys = ON");
+  }
+
   // Seed if empty
   const count = (db.prepare("SELECT COUNT(*) as n FROM categories").get() as { n: number }).n;
   if (count === 0) seedDb(db);
@@ -157,62 +190,80 @@ function seedDb(db: Database.Database) {
     { id: "revenus", name: "Revenus", type: "income", icon: "💰", parent_id: null, budget: null, sort_order: 1 },
     { id: "salaire", name: "Salaire", type: "income", icon: "💼", parent_id: "revenus", budget: null, sort_order: 2 },
     { id: "loyers", name: "Loyers", type: "income", icon: "🏠", parent_id: "revenus", budget: null, sort_order: 3 },
-    { id: "allocations", name: "Allocations & aides", type: "income", icon: "👶", parent_id: "revenus", budget: null, sort_order: 4 },
-    { id: "autre-revenu", name: "Autres revenus", type: "income", icon: "📥", parent_id: "revenus", budget: null, sort_order: 5 },
+    { id: "allocations", name: "Allocations & aides (CAF)", type: "income", icon: "👶", parent_id: "revenus", budget: null, sort_order: 4 },
+    { id: "remboursements", name: "Remboursements & crédits d'impôt", type: "income", icon: "💸", parent_id: "revenus", budget: null, sort_order: 5 },
+    { id: "autre-revenu", name: "Autres revenus", type: "income", icon: "📥", parent_id: "revenus", budget: null, sort_order: 6 },
     // TRANSFERTS
     { id: "transferts", name: "Transferts", type: "transfer", icon: "🔄", parent_id: null, budget: null, sort_order: 10 },
-    { id: "vir-joint", name: "→ Compte Joint", type: "transfer", icon: "🔄", parent_id: "transferts", budget: null, sort_order: 11 },
-    { id: "vir-immo", name: "→ Compte Immo", type: "transfer", icon: "🔄", parent_id: "transferts", budget: null, sort_order: 12 },
-    { id: "vir-interne", name: "Transfert interne", type: "transfer", icon: "🔄", parent_id: "transferts", budget: null, sort_order: 13 },
+    { id: "vir-joint", name: "Virement → Compte Joint", type: "transfer", icon: "🔄", parent_id: "transferts", budget: null, sort_order: 11 },
+    { id: "vir-immo", name: "Virement → Compte Immo", type: "transfer", icon: "🔄", parent_id: "transferts", budget: null, sort_order: 12 },
+    { id: "vir-interne", name: "Transfert interne (autres)", type: "transfer", icon: "🔄", parent_id: "transferts", budget: null, sort_order: 13 },
     // CREDITS
     { id: "credits", name: "Crédits", type: "dette", icon: "🏦", parent_id: null, budget: null, sort_order: 20 },
-    { id: "credit-immo", name: "Crédit immobilier", type: "dette", icon: "🏦", parent_id: "credits", budget: null, sort_order: 21 },
-    { id: "pret-perso", name: "Prêt personnel", type: "dette", icon: "🏦", parent_id: "credits", budget: null, sort_order: 22 },
+    { id: "credit-immo", name: "Crédit immobilier (échéances)", type: "dette", icon: "🏦", parent_id: "credits", budget: null, sort_order: 21 },
+    { id: "pret-perso", name: "Prêt personnel (échéances)", type: "dette", icon: "🏦", parent_id: "credits", budget: null, sort_order: 22 },
     { id: "amex-prlv", name: "Prélèvement Amex", type: "dette", icon: "💎", parent_id: "credits", budget: null, sort_order: 23 },
     // ALIMENTATION
     { id: "alimentation", name: "Alimentation", type: "expense", icon: "🛒", parent_id: null, budget: 1100, sort_order: 30 },
-    { id: "courses", name: "Courses & supermarché", type: "expense", icon: "🛒", parent_id: "alimentation", budget: 800, sort_order: 31 },
-    { id: "resto", name: "Restaurants & sorties", type: "expense", icon: "🍽️", parent_id: "alimentation", budget: 400, sort_order: 32 },
-    { id: "livraison", name: "Livraison repas", type: "expense", icon: "🛵", parent_id: "alimentation", budget: 150, sort_order: 33 },
+    { id: "courses", name: "Courses & supermarché", type: "expense", icon: "🛒", parent_id: "alimentation", budget: 600, sort_order: 31 },
+    { id: "boulangerie", name: "Boulangerie", type: "expense", icon: "🥖", parent_id: "alimentation", budget: 50, sort_order: 32 },
+    { id: "resto", name: "Restaurants & sorties", type: "expense", icon: "🍽️", parent_id: "alimentation", budget: 300, sort_order: 33 },
+    { id: "livraison", name: "Livraison repas", type: "expense", icon: "🛵", parent_id: "alimentation", budget: 100, sort_order: 34 },
+    { id: "snacking", name: "Snacking & distributeurs", type: "expense", icon: "🍫", parent_id: "alimentation", budget: 50, sort_order: 35 },
     // ENFANTS
     { id: "enfants", name: "Enfants", type: "expense", icon: "👨‍👩‍👧‍👦", parent_id: null, budget: 1500, sort_order: 40 },
-    { id: "garde", name: "Garde d'enfants", type: "expense", icon: "👶", parent_id: "enfants", budget: 1200, sort_order: 41 },
-    { id: "enfants-activites", name: "Activités & école", type: "expense", icon: "🎒", parent_id: "enfants", budget: 150, sort_order: 42 },
-    { id: "enfants-shopping", name: "Shopping enfants", type: "expense", icon: "🧸", parent_id: "enfants", budget: 150, sort_order: 43 },
-    // BIEN-ETRE
-    { id: "bien-etre", name: "Bien-être & santé", type: "expense", icon: "🌿", parent_id: null, budget: 300, sort_order: 50 },
-    { id: "sante", name: "Santé & pharmacie", type: "expense", icon: "🏥", parent_id: "bien-etre", budget: 150, sort_order: 51 },
-    { id: "coiffeur", name: "Coiffeur & soins", type: "expense", icon: "✂️", parent_id: "bien-etre", budget: 100, sort_order: 52 },
-    { id: "sport", name: "Sport & fitness", type: "expense", icon: "🏃", parent_id: "bien-etre", budget: 50, sort_order: 53 },
-    // TRANSPORTS
-    { id: "transports", name: "Transports", type: "expense", icon: "🚀", parent_id: null, budget: 400, sort_order: 60 },
-    { id: "transport-commun", name: "Transport en commun", type: "expense", icon: "🚇", parent_id: "transports", budget: 200, sort_order: 61 },
-    { id: "taxi", name: "Taxi & VTC", type: "expense", icon: "🚕", parent_id: "transports", budget: 100, sort_order: 62 },
-    { id: "voiture", name: "Voiture", type: "expense", icon: "🚗", parent_id: "transports", budget: 100, sort_order: 63 },
-    // VOYAGES
-    { id: "voyages", name: "Voyages & vacances", type: "expense", icon: "✈️", parent_id: null, budget: 5000, sort_order: 70 },
-    { id: "transport-voyage", name: "Billets & transports", type: "expense", icon: "🛫", parent_id: "voyages", budget: null, sort_order: 71 },
-    { id: "hebergement", name: "Hébergement", type: "expense", icon: "🏨", parent_id: "voyages", budget: null, sort_order: 72 },
-    { id: "activites-voyage", name: "Activités & sorties", type: "expense", icon: "🗺️", parent_id: "voyages", budget: null, sort_order: 73 },
-    // SHOPPING
-    { id: "shopping-loisirs", name: "Shopping & loisirs", type: "expense", icon: "🛍️", parent_id: null, budget: 400, sort_order: 80 },
-    { id: "shopping", name: "Shopping & maison", type: "expense", icon: "🛍️", parent_id: "shopping-loisirs", budget: 250, sort_order: 81 },
-    { id: "loisirs", name: "Loisirs & culture", type: "expense", icon: "🎯", parent_id: "shopping-loisirs", budget: 150, sort_order: 82 },
-    // ABONNEMENTS
-    { id: "abonnements-telecom", name: "Abonnements & télécom", type: "expense", icon: "📱", parent_id: null, budget: 180, sort_order: 90 },
-    { id: "telecom", name: "Télécom", type: "expense", icon: "📡", parent_id: "abonnements-telecom", budget: 80, sort_order: 91 },
-    { id: "abonnements", name: "Abonnements numériques", type: "expense", icon: "📦", parent_id: "abonnements-telecom", budget: 100, sort_order: 92 },
+    { id: "garde", name: "Garde (crèche, Kinougarde, CESU)", type: "expense", icon: "👶", parent_id: "enfants", budget: 1200, sort_order: 41 },
+    { id: "enfants-activites", name: "Activités & école", type: "expense", icon: "🎒", parent_id: "enfants", budget: 300, sort_order: 42 },
     // LOGEMENT
-    { id: "logement", name: "Logement & charges", type: "expense", icon: "🏠", parent_id: null, budget: 300, sort_order: 100 },
-    { id: "copro", name: "Copro & syndic", type: "expense", icon: "🏢", parent_id: "logement", budget: 150, sort_order: 101 },
-    { id: "securite", name: "Sécurité (Verisure)", type: "expense", icon: "🔐", parent_id: "logement", budget: 50, sort_order: 102 },
-    { id: "assurance", name: "Assurance", type: "expense", icon: "🛡️", parent_id: "logement", budget: 100, sort_order: 103 },
-    // FINANCES
-    { id: "finances-admin", name: "Finances & admin", type: "expense", icon: "📋", parent_id: null, budget: 100, sort_order: 110 },
-    { id: "impots", name: "Impôts & taxes", type: "expense", icon: "🏛️", parent_id: "finances-admin", budget: null, sort_order: 111 },
-    { id: "frais-bancaires", name: "Frais bancaires", type: "expense", icon: "🏧", parent_id: "finances-admin", budget: 20, sort_order: 112 },
-    { id: "comptable-avocat", name: "Comptable & juridique", type: "expense", icon: "⚖️", parent_id: "finances-admin", budget: null, sort_order: 113 },
-    { id: "retraits", name: "Retraits espèces", type: "expense", icon: "💵", parent_id: "finances-admin", budget: null, sort_order: 114 },
+    { id: "logement", name: "Logement", type: "expense", icon: "🏠", parent_id: null, budget: 300, sort_order: 50 },
+    { id: "copro", name: "Copropriété & syndic", type: "expense", icon: "🏢", parent_id: "logement", budget: 150, sort_order: 51 },
+    { id: "securite", name: "Sécurité (Verisure)", type: "expense", icon: "🔐", parent_id: "logement", budget: 50, sort_order: 52 },
+    { id: "assurance", name: "Assurance habitation", type: "expense", icon: "🛡️", parent_id: "logement", budget: 100, sort_order: 53 },
+    // TRANSPORTS
+    { id: "transports", name: "Transports", type: "expense", icon: "🚀", parent_id: null, budget: 500, sort_order: 60 },
+    { id: "transport-commun", name: "Transport en commun (Navigo)", type: "expense", icon: "🚇", parent_id: "transports", budget: 100, sort_order: 61 },
+    { id: "taxi", name: "Taxi & VTC", type: "expense", icon: "🚕", parent_id: "transports", budget: 100, sort_order: 62 },
+    { id: "voiture-recharge", name: "Voiture : recharge électrique", type: "expense", icon: "⚡", parent_id: "transports", budget: 100, sort_order: 63 },
+    { id: "voiture-peage", name: "Voiture : péage", type: "expense", icon: "🛣️", parent_id: "transports", budget: 50, sort_order: 64 },
+    { id: "voiture-parking", name: "Voiture : parking", type: "expense", icon: "🅿️", parent_id: "transports", budget: 50, sort_order: 65 },
+    { id: "voiture-carburant", name: "Voiture : carburant & entretien", type: "expense", icon: "⛽", parent_id: "transports", budget: 100, sort_order: 66 },
+    // SANTE
+    { id: "sante", name: "Santé", type: "expense", icon: "🏥", parent_id: null, budget: 400, sort_order: 70 },
+    { id: "pharmacie", name: "Pharmacie", type: "expense", icon: "💊", parent_id: "sante", budget: 100, sort_order: 71 },
+    { id: "medecin", name: "Médecin & soins médicaux", type: "expense", icon: "🩺", parent_id: "sante", budget: 150, sort_order: 72 },
+    { id: "esthetique", name: "Esthétique (coiffeur, esthéticienne)", type: "expense", icon: "✂️", parent_id: "sante", budget: 80, sort_order: 73 },
+    { id: "spa", name: "Spa & détente", type: "expense", icon: "🧖", parent_id: "sante", budget: 70, sort_order: 74 },
+    // ABONNEMENTS & TELECOM
+    { id: "abonnements-telecom", name: "Abonnements & télécom", type: "expense", icon: "📱", parent_id: null, budget: 180, sort_order: 80 },
+    { id: "telecom", name: "Télécom (Bouygues, Free)", type: "expense", icon: "📡", parent_id: "abonnements-telecom", budget: 80, sort_order: 81 },
+    { id: "streaming", name: "Streaming & apps", type: "expense", icon: "📺", parent_id: "abonnements-telecom", budget: 60, sort_order: 82 },
+    { id: "autres-abonnements", name: "Autres abonnements", type: "expense", icon: "📦", parent_id: "abonnements-telecom", budget: 40, sort_order: 83 },
+    // SHOPPING & LOISIRS
+    { id: "shopping-loisirs", name: "Shopping & loisirs", type: "expense", icon: "🛍️", parent_id: null, budget: 600, sort_order: 90 },
+    { id: "vetements", name: "Vêtements & chaussures", type: "expense", icon: "👗", parent_id: "shopping-loisirs", budget: 150, sort_order: 91 },
+    { id: "accessoires", name: "Accessoires", type: "expense", icon: "👜", parent_id: "shopping-loisirs", budget: 50, sort_order: 92 },
+    { id: "maison-deco", name: "Maison & déco", type: "expense", icon: "🏡", parent_id: "shopping-loisirs", budget: 100, sort_order: 93 },
+    { id: "enfants-shopping", name: "Shopping enfants", type: "expense", icon: "🧸", parent_id: "shopping-loisirs", budget: 100, sort_order: 94 },
+    { id: "sport", name: "Sport & fitness", type: "expense", icon: "🏃", parent_id: "shopping-loisirs", budget: 50, sort_order: 95 },
+    { id: "loisirs", name: "Loisirs & culture", type: "expense", icon: "🎯", parent_id: "shopping-loisirs", budget: 150, sort_order: 96 },
+    // VOYAGES
+    { id: "voyages", name: "Voyages & vacances", type: "expense", icon: "✈️", parent_id: null, budget: 5000, sort_order: 100 },
+    { id: "transport-voyage", name: "Billets & transport voyage", type: "expense", icon: "🛫", parent_id: "voyages", budget: null, sort_order: 101 },
+    { id: "hebergement", name: "Hébergement", type: "expense", icon: "🏨", parent_id: "voyages", budget: null, sort_order: 102 },
+    { id: "activites-voyage", name: "Activités & sorties sur place", type: "expense", icon: "🗺️", parent_id: "voyages", budget: null, sort_order: 103 },
+    // CADEAUX & DONS
+    { id: "cadeaux-dons", name: "Cadeaux & dons", type: "expense", icon: "🎁", parent_id: null, budget: 200, sort_order: 110 },
+    { id: "cadeaux", name: "Cadeaux", type: "expense", icon: "🎁", parent_id: "cadeaux-dons", budget: 150, sort_order: 111 },
+    { id: "dons", name: "Dons & église", type: "expense", icon: "🙏", parent_id: "cadeaux-dons", budget: 50, sort_order: 112 },
+    // FINANCES & ADMIN
+    { id: "finances-admin", name: "Finances & admin", type: "expense", icon: "📋", parent_id: null, budget: 100, sort_order: 120 },
+    { id: "impots-ir", name: "Impôt sur le revenu", type: "expense", icon: "🏛️", parent_id: "finances-admin", budget: null, sort_order: 121 },
+    { id: "taxe-fonciere", name: "Taxe foncière", type: "expense", icon: "🏠", parent_id: "finances-admin", budget: null, sort_order: 122 },
+    { id: "amendes", name: "Amendes & PV", type: "expense", icon: "🚨", parent_id: "finances-admin", budget: null, sort_order: 123 },
+    { id: "autres-taxes", name: "Autres taxes", type: "expense", icon: "📄", parent_id: "finances-admin", budget: null, sort_order: 124 },
+    { id: "frais-bancaires", name: "Frais bancaires", type: "expense", icon: "🏧", parent_id: "finances-admin", budget: 20, sort_order: 125 },
+    { id: "comptable-avocat", name: "Comptable & juridique", type: "expense", icon: "⚖️", parent_id: "finances-admin", budget: null, sort_order: 126 },
+    { id: "retraits", name: "Retraits espèces (DAB)", type: "expense", icon: "💵", parent_id: "finances-admin", budget: null, sort_order: 127 },
     // DIVERS
     { id: "divers", name: "Divers / Non classé", type: "expense", icon: "❓", parent_id: null, budget: null, sort_order: 999 },
   ];
@@ -243,13 +294,13 @@ function seedDb(db: Database.Database) {
     { pattern: "UBER EATS", category_id: "livraison" },
     { pattern: "LPCR", category_id: "garde" },
     { pattern: "VACHERAND SYNDIC", category_id: "copro" },
-    { pattern: "SAEMES PARKING", category_id: "voiture" },
-    { pattern: "IZIVIA RECHARGE", category_id: "voiture" },
+    { pattern: "SAEMES PARKING", category_id: "voiture-parking" },
+    { pattern: "IZIVIA RECHARGE", category_id: "voiture-recharge" },
     { pattern: "G7 TAXI", category_id: "taxi" },
     { pattern: "NAVIGO RATP", category_id: "transport-commun" },
     { pattern: "BOUYGUES TELECOM", category_id: "telecom" },
     { pattern: "VERISURE", category_id: "securite" },
-    { pattern: "APPLE.COM/BILL", category_id: "abonnements" },
+    { pattern: "APPLE.COM/BILL", category_id: "streaming" },
     { pattern: "AMERICAN EXPRESS", category_id: "amex-prlv" },
     { pattern: "SINEQUA SALAIRE", category_id: "salaire" },
     { pattern: "CAF DES HAUTS", category_id: "allocations" },
@@ -260,8 +311,8 @@ function seedDb(db: Database.Database) {
     { pattern: "FRANPRIX", category_id: "courses" },
     { pattern: "PICARD SURGELES", category_id: "courses" },
     { pattern: "MON-MARCHE.FR", category_id: "courses" },
-    { pattern: "AMAZON PRIME", category_id: "abonnements" },
-    { pattern: "ADOBE CREATIVE", category_id: "abonnements" },
+    { pattern: "AMAZON PRIME", category_id: "streaming" },
+    { pattern: "ADOBE CREATIVE", category_id: "streaming" },
   ];
 
   // Valeurs immobilières et crédits metadata par défaut (éditables dans Paramètres)

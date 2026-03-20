@@ -176,6 +176,35 @@ function initSchema(db: Database.Database) {
     db.pragma("foreign_keys = ON");
   }
 
+  // ── v3: Clean up ghost categories created by LLM classification ──
+  // The classify prompt used to allow Claude to create new subcategories.
+  // This migration removes those ghost categories and reassigns their transactions to "divers".
+  const ghostCount = (db.prepare(`
+    SELECT COUNT(*) as n FROM categories WHERE icon = '📋' AND id != 'finances-admin'
+  `).get() as { n: number }).n;
+  if (ghostCount > 0) {
+    db.pragma("foreign_keys = OFF");
+    db.transaction(() => {
+      // Reassign transactions pointing to ghost categories → divers
+      db.exec(`
+        UPDATE transactions SET category_id = 'divers'
+        WHERE category_id IN (
+          SELECT id FROM categories WHERE icon = '📋' AND id != 'finances-admin'
+        )
+      `);
+      // Remove rules pointing to ghost categories
+      db.exec(`
+        DELETE FROM rules WHERE category_id IN (
+          SELECT id FROM categories WHERE icon = '📋' AND id != 'finances-admin'
+        )
+      `);
+      // Delete the ghost categories themselves
+      db.exec("DELETE FROM categories WHERE icon = '📋' AND id != 'finances-admin'");
+    })();
+    db.pragma("foreign_keys = ON");
+    console.log(`[db] v3 migration: removed ${ghostCount} ghost categories`);
+  }
+
   // Seed if empty
   const count = (db.prepare("SELECT COUNT(*) as n FROM categories").get() as { n: number }).n;
   if (count === 0) seedDb(db);

@@ -40,10 +40,16 @@ function buildFullContext(from: string, to: string) {
     id: string; name: string; bank: string; type: string; balance: number; seed_balance: number;
   }[];
 
-  const budgets = db.prepare(`
-    SELECT c.id, c.name, c.budget FROM categories c
-    WHERE c.budget IS NOT NULL AND c.parent_id IS NULL
-  `).all() as { id: string; name: string; budget: number }[];
+  // Compute parent budgets as sum of children budgets
+  const allCats = db.prepare("SELECT id, name, type, parent_id, budget FROM categories").all() as {
+    id: string; name: string; type: string; parent_id: string | null; budget: number | null;
+  }[];
+  const expenseParents = allCats.filter(c => !c.parent_id && c.type === "expense");
+  const budgets = expenseParents.map(p => {
+    const children = allCats.filter(c => c.parent_id === p.id);
+    const sum = children.reduce((s, c) => s + (c.budget || 0), 0);
+    return { id: p.id, name: p.name, budget: sum };
+  }).filter(b => b.budget > 0);
 
   // Financial facts from settings
   const getSetting = (key: string) => {
@@ -65,6 +71,8 @@ function buildFullContext(from: string, to: string) {
     label: t.label,
     amount: t.amount,
     category: t.cat_name,
+    category_id: t.category_id,
+    parent_id: t.parent_id,
     parent_category: t.parent_name || t.cat_name,
     type: t.cat_type,
     account: t.account_name,
@@ -359,17 +367,18 @@ Base all numbers on actual averages from the transaction data.`;
 function buildBudgetSuggestionsPrompt(ctx: ReturnType<typeof buildFullContext>): string {
   return `${buildDataHeader(ctx)}
 
-TASK: Analyze spending data and suggest realistic monthly budgets for each expense category.
+TASK: Analyze spending data and suggest realistic monthly budgets for SUBCATEGORIES ONLY (not parent categories).
 
-For each parent category AND each subcategory with significant spending (>30€/month average), calculate the MEDIAN monthly spending over the analysis period (${ctx.monthsDiff} months). Suggest a budget slightly above the median to allow for variation, but below any outlier months.
+For each subcategory with spending, calculate the MEDIAN monthly spending over the analysis period (${ctx.monthsDiff} months). Suggest a budget slightly above the median to allow for variation, but below any outlier months.
 
 CRITICAL: Respond ONLY with a raw JSON array. No text before, no text after, no markdown, no backticks, no code fences.
 Format exactly:
-[{"category_id":"alimentation","suggested_budget":950,"reasoning":"Médiane 920€, pic à 1180€ en décembre. 950€ laisse une marge raisonnable."},{"category_id":"courses","suggested_budget":580,"reasoning":"Médiane 560€ sur 6 mois."}]
+[{"category_id":"courses","suggested_budget":580,"reasoning":"Médiane 560€ sur 6 mois."},{"category_id":"garde","suggested_budget":1250,"reasoning":"Médiane 1204€, charge fixe récurrente."}]
 
 Rules:
-- Include ALL parent expense categories that have spending
-- Include subcategories that have significant spending (>30€/month average)
+- Suggest budgets ONLY for subcategories (categories that have a parent), NEVER for parent categories like "alimentation", "transports", "enfants", etc.
+- The parent budget will be auto-computed as the sum of its children — do NOT include parents in the output
+- Include all subcategories with spending > 0€ over the period
 - Base suggestions on the MEDIAN monthly spending, not the average
 - suggested_budget must be a round number (multiple of 10)
 - reasoning: 1 sentence in French, cite the median and any notable pattern
@@ -380,10 +389,14 @@ Rules:
 // ─── Category insight prompt (JSON) ─────────────────────────────────────────
 
 function buildCategoryInsightPrompt(ctx: ReturnType<typeof buildFullContext>, categoryId: string): string {
+  // Filter transactions belonging to this category or its subcategories
+  const catTxs = ctx.txJson.filter(t =>
+    t.category_id === categoryId || t.parent_id === categoryId
+  );
   const header = `FINANCIAL DATA
 period: ${ctx.from} → ${ctx.to}
-transactions_count: ${ctx.txCount}
-transactions: ${JSON.stringify(ctx.txJson.filter(t => t.type === "expense"), null, 0)}`;
+transactions_count: ${catTxs.length}
+transactions: ${JSON.stringify(catTxs, null, 0)}`;
 
   const contextBlock = ctx.userContext && ctx.userContext.trim().length > 0
     ? `\nUSER CONTEXT: ${ctx.userContext.trim()}\n`

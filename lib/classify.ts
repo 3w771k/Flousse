@@ -240,9 +240,9 @@ const BUILTIN_RULES: BuiltinRule[] = [
   { pattern: "FREE MOBILE", categoryId: "telecom" },
   { pattern: "ORANGE", categoryId: "telecom" },
 
-  // ── Logement (énergie) ──
-  { pattern: "EDF", categoryId: "logement" },
-  { pattern: "ENGIE", categoryId: "logement" },
+  // ── Logement : énergie ──
+  { pattern: "EDF", categoryId: "energie" },
+  { pattern: "ENGIE", categoryId: "energie" },
 
   // ── Retraits DAB ──
   { pattern: "RETRAIT DAB", categoryId: "retraits" },

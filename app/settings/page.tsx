@@ -133,7 +133,19 @@ export default function SettingsPage() {
   };
 
   const saveBudgets = async () => {
-    const updates = Object.entries(savedBudgets).map(([id, budget]) => ({ id, budget }));
+    // Build updates: children budgets + computed parent sums
+    const expenseParents = categories.filter((c) => !c.parent_id && c.type === "expense");
+    const updates: { id: string; budget: number }[] = [];
+    for (const parent of expenseParents) {
+      const children = categories.filter((c) => c.parent_id === parent.id);
+      let parentSum = 0;
+      for (const child of children) {
+        const b = savedBudgets[child.id] ?? child.budget ?? 0;
+        updates.push({ id: child.id, budget: b });
+        parentSum += b;
+      }
+      updates.push({ id: parent.id, budget: parentSum });
+    }
     const res = await fetch("/api/categories", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -403,39 +415,40 @@ export default function SettingsPage() {
 
               {parents.filter((p) => p.type === "expense").map((parent) => {
                 const children = childrenOf(parent.id);
+                // Parent budget = sum of children budgets (auto-computed)
+                const parentSum = children.reduce((sum, c) => {
+                  const b = savedBudgets[c.id] ?? c.budget;
+                  return sum + (b ?? 0);
+                }, 0);
                 return (
                   <div key={parent.id} style={{ marginBottom: 16, borderRadius: 10, overflow: "hidden", border: "1px solid rgba(0,0,0,0.06)" }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", background: "rgba(0,0,0,0.02)" }}>
                       <span style={{ fontSize: 14 }}>{parent.icon}</span>
                       <span style={{ flex: 1, fontSize: 13, fontWeight: 500, color: "#1D1D1F" }}>{parent.name}</span>
-                      {parent.budget != null && (
-                        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                          <span style={{ fontSize: 11, color: "#86868B" }}>Budget :</span>
-                          <input
-                            type="number"
-                            value={savedBudgets[parent.id] ?? parent.budget ?? ""}
-                            onChange={(e) => setSavedBudgets((prev) => ({ ...prev, [parent.id]: parseInt(e.target.value) || 0 }))}
-                            style={{ width: 60, padding: "3px 8px", borderRadius: 6, border: "1px solid rgba(0,0,0,0.1)", fontSize: 12, textAlign: "right" }}
-                          />
-                          <span style={{ fontSize: 11, color: "#86868B" }}>€/mois</span>
-                        </div>
-                      )}
+                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <span style={{ fontSize: 11, color: "#86868B" }}>Budget :</span>
+                        <span style={{ fontSize: 12, fontWeight: 500, color: "#1D1D1F", minWidth: 50, textAlign: "right" }}>{parentSum}</span>
+                        <span style={{ fontSize: 11, color: "#86868B" }}>€/mois</span>
+                      </div>
                     </div>
                     {children.map((sub) => (
                       <div key={sub.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 14px 8px 28px", borderTop: "1px solid rgba(0,0,0,0.04)" }}>
                         <span style={{ fontSize: 12 }}>{sub.icon}</span>
                         <span style={{ flex: 1, fontSize: 12, color: "#86868B" }}>{sub.name}</span>
-                        {sub.budget != null && (
-                          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                            <input
-                              type="number"
-                              value={savedBudgets[sub.id] ?? sub.budget ?? ""}
-                              onChange={(e) => setSavedBudgets((prev) => ({ ...prev, [sub.id]: parseInt(e.target.value) || 0 }))}
-                              style={{ width: 60, padding: "3px 8px", borderRadius: 6, border: "1px solid rgba(0,0,0,0.1)", fontSize: 12, textAlign: "right" }}
-                            />
-                            <span style={{ fontSize: 11, color: "#AEAEB2" }}>€/mois</span>
-                          </div>
-                        )}
+                        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                          <input
+                            type="text"
+                            inputMode="numeric"
+                            pattern="[0-9]*"
+                            value={savedBudgets[sub.id] ?? sub.budget ?? ""}
+                            onChange={(e) => {
+                              const v = parseInt(e.target.value) || 0;
+                              setSavedBudgets((prev) => ({ ...prev, [sub.id]: v }));
+                            }}
+                            style={{ width: 60, padding: "3px 8px", borderRadius: 6, border: "1px solid rgba(0,0,0,0.1)", fontSize: 12, textAlign: "right" }}
+                          />
+                          <span style={{ fontSize: 11, color: "#AEAEB2" }}>€/mois</span>
+                        </div>
                       </div>
                     ))}
                   </div>

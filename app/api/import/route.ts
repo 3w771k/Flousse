@@ -28,7 +28,12 @@ export async function POST(req: NextRequest) {
     const account = db.prepare("SELECT id FROM accounts WHERE id = ?").get(accountId);
     if (!account) return NextResponse.json({ error: "account not found" }, { status: 404 });
 
-    const content = await file.text();
+    // Try UTF-8 first, fallback to Latin-1 for Crédit Mutuel / CIC files
+    const buf = await file.arrayBuffer();
+    let content = new TextDecoder("utf-8").decode(buf);
+    if (content.includes("\ufffd")) {
+      content = new TextDecoder("latin1").decode(buf);
+    }
     const rawTxs = parseCsv(file.name, content);
 
     if (rawTxs.length === 0) {

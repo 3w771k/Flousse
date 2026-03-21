@@ -66,10 +66,33 @@ export function parseAmex(csv: string): RawTransaction[] {
   });
 }
 
+// ── Crédit Mutuel / CIC / Fortuneo CSV ─────────────────────────────────────
+// Header: Date;Date de valeur;Date d'analyse;Libellé;Note personnelle;Débit;Crédit;Catégorie;Sous-catégorie;Solde;...
+// Data: DD/MM/YYYY;...;...;description;;-12,50;;...;...;3332,71;;
+export function parseCreditMutuel(csv: string): RawTransaction[] {
+  const lines = csv.trim().replace(/\r\n?/g, "\n").split("\n").slice(1); // skip header
+  return lines.flatMap((line) => {
+    const parts = line.split(";");
+    if (parts.length < 7) return [];
+    const dateStr = parts[0]?.trim();
+    const rawLabel = parts[3]?.trim().replace(/\s+/g, " ") || "";
+    const debitStr = parts[5]?.trim().replace(/\s/g, "").replace(",", ".") || "";
+    const creditStr = parts[6]?.trim().replace(/\s/g, "").replace(",", ".") || "";
+    const debit = parseFloat(debitStr) || 0;  // already negative in file
+    const credit = parseFloat(creditStr) || 0;
+    if (!dateStr || (debit === 0 && credit === 0)) return [];
+    const amount = credit > 0 ? credit : debit; // debit is already negative
+    const txDate = parseFrDate(dateStr);
+    const real_date = extractRealDateCM(rawLabel, txDate);
+    return [{ date: txDate, real_date, label: cleanLabel(rawLabel), amount }];
+  });
+}
+
 // ── Auto-detect format ─────────────────────────────────────────────────────
-export function detectFormat(filename: string, firstLine: string): "hellobank" | "ccf" | "amex" | null {
+export function detectFormat(filename: string, firstLine: string): "hellobank" | "ccf" | "amex" | "creditmutuel" | null {
   const fn = filename.toLowerCase();
   if (fn.includes("activity") || firstLine.toLowerCase().includes("description,montant")) return "amex";
+  if (firstLine.includes("Date de valeur") || firstLine.includes("Date d") || firstLine.includes("Sous-cat")) return "creditmutuel";
   if (firstLine.startsWith('"Date operation"') || firstLine.startsWith("\"Date operation\"")) return "ccf";
   if (firstLine.includes("COMPTE") || firstLine.match(/^[A-Z\s]+;/)) return "hellobank";
   if (firstLine.startsWith("RELEVE") || fn.startsWith("releve")) return "ccf";
@@ -80,6 +103,7 @@ export function parseCsv(filename: string, content: string): RawTransaction[] {
   const firstLine = content.split("\n")[0] || "";
   const fmt = detectFormat(filename, firstLine);
   if (fmt === "amex") return parseAmex(content);
+  if (fmt === "creditmutuel") return parseCreditMutuel(content);
   if (fmt === "ccf") return parseCCF(content);
   if (fmt === "hellobank") return parseHelloBank(content);
   // Fallback: try CCF (most common)
@@ -107,6 +131,18 @@ function extractRealDateCCF(label: string, txDate: string): string | undefined {
   const cardMonth = parseInt(mm, 10);
   // If card month is much larger than tx month, it was likely from previous year
   // e.g., tx date Jan (01) but card date Dec (12) → previous year
+  const year = cardMonth > txMonth + 1 ? txYear - 1 : txYear;
+  return `${year}-${mm}-${dd}`;
+}
+
+// Crédit Mutuel: "PAIEMENT CB 0603" or "PAIEMENT PSC 1903" → DDMM → YYYY-MM-DD
+function extractRealDateCM(label: string, txDate: string): string | undefined {
+  const match = label.match(/(?:CB|PSC)\s+(\d{2})(\d{2})\b/i);
+  if (!match) return undefined;
+  const [, dd, mm] = match;
+  const txYear = parseInt(txDate.slice(0, 4), 10);
+  const txMonth = parseInt(txDate.slice(5, 7), 10);
+  const cardMonth = parseInt(mm, 10);
   const year = cardMonth > txMonth + 1 ? txYear - 1 : txYear;
   return `${year}-${mm}-${dd}`;
 }

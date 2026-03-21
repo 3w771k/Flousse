@@ -259,16 +259,20 @@ export default function DashboardPage() {
   const [viewMode, setViewMode] = useState<"depenses" | "revenus">("depenses");
 
   // Compute stats
-  let income = 0, expense = 0, debt = 0;
+  let income = 0, expense = 0, debt = 0, transfers = 0;
   const byParentExp: Record<string, number> = {};
   const bySubExp: Record<string, Record<string, number>> = {};
   const byParentInc: Record<string, number> = {};
   const bySubInc: Record<string, Record<string, number>> = {};
   const months = PERIODS[periodIdx].months;
+  // Same rule as cashflow: vir-interne excluded for "Tous", included for per-person
+  const includeVirInterne = ownerFilter !== "all";
 
   filteredTxs.forEach((t) => {
     const cat = cats.get(t.category_id);
     if (!cat) return;
+    // Skip vir-interne when viewing "Tous"
+    if (!includeVirInterne && t.category_id === "vir-interne") return;
     const abs = Math.abs(t.amount);
     if (cat.type === "income") {
       income += abs;
@@ -277,7 +281,9 @@ export default function DashboardPage() {
       if (!bySubInc[pId]) bySubInc[pId] = {};
       bySubInc[pId][t.category_id] = (bySubInc[pId][t.category_id] || 0) + abs;
     } else if (cat.type === "dette") debt += abs;
-    else if (cat.type === "expense") {
+    else if (cat.type === "transfer" && t.amount < 0) {
+      transfers += abs;
+    } else if (cat.type === "expense") {
       expense += abs;
       const pId = cat.parent_id || cat.id;
       byParentExp[pId] = (byParentExp[pId] || 0) + abs;
@@ -286,7 +292,7 @@ export default function DashboardPage() {
     }
   });
 
-  const net = income - expense - debt;
+  const net = income - expense - debt - transfers;
   const byParent = viewMode === "depenses" ? byParentExp : byParentInc;
   const bySub = viewMode === "depenses" ? bySubExp : bySubInc;
   const topParents = Object.entries(byParent)
@@ -370,7 +376,9 @@ export default function DashboardPage() {
         {[
           { label: months > 1 ? "Revenus (total)" : "Revenus", value: income, color: "#34C759", sub: months > 1 ? `${months} mois · moy. ${fek(income / months)}/mois` : "Salaires + allocations" },
           { label: months > 1 ? "Dépensé (total)" : "Dépensé", value: expense, color: "#FF3B30", sub: months > 1 ? `moy. ${fek(expense / months)}/mois` : "Hors crédits" },
-          { label: "Reste à vivre", value: net, color: net >= 0 ? "#34C759" : "#FF3B30", sub: months > 1 ? `moy. ${fek(net / months)}/mois · crédits ${fe(debt)}` : `après crédits ${fe(debt)}` },
+          { label: "Reste à vivre", value: net, color: net >= 0 ? "#34C759" : "#FF3B30", sub: months > 1
+            ? `moy. ${fek(net / months)}/mois · crédits ${fe(debt)}${transfers > 0 ? ` · transferts ${fe(transfers)}` : ""}`
+            : `${debt > 0 ? `crédits ${fe(debt)}` : ""}${debt > 0 && transfers > 0 ? " · " : ""}${transfers > 0 ? `transferts ${fe(transfers)}` : ""}${debt === 0 && transfers === 0 ? "après crédits et transferts" : ""}` },
         ].map((item, i) => (
           <div key={item.label} style={{ display: "contents" }}>
             {i > 0 && <div style={{ background: "rgba(0,0,0,0.04)", width: 1 }} />}

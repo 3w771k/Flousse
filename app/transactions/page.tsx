@@ -1,5 +1,6 @@
 "use client";
 import { useState, useEffect, useCallback } from "react";
+import { useChatContext } from "@/components/ChatContext";
 
 const fe = (n: number) =>
   new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" }).format(n);
@@ -88,6 +89,7 @@ export default function TransactionsPage() {
   const [cats, setCats] = useState<Map<string, Category>>(new Map());
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [loading, setLoading] = useState(true);
+  const { setPageContext } = useChatContext();
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -121,6 +123,10 @@ export default function TransactionsPage() {
   }, [selectedMonth, accountFilter, categoryFilter, search]);
 
   useEffect(() => { loadData(); }, [loadData]);
+
+  useEffect(() => {
+    setPageContext({ page: "transactions", filters: { ...(selectedMonth ? { month: selectedMonth } : {}), accountId: accountFilter, categoryId: categoryFilter } });
+  }, [setPageContext, selectedMonth, accountFilter, categoryFilter]);
 
   const updateCategory = async (txId: string, categoryId: string, label: string) => {
     const prevTxs = txs;

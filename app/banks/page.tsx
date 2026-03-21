@@ -1,6 +1,7 @@
 "use client";
 import { useState, useEffect } from "react";
 import Link from "next/link";
+import { useChatContext } from "@/components/ChatContext";
 
 const fe = (n: number) =>
   new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(n);
@@ -62,6 +63,9 @@ export default function PatrimoinePage() {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [settings, setSettings] = useState<Settings>({});
   const [loading, setLoading] = useState(true);
+  const { setPageContext } = useChatContext();
+
+  useEffect(() => { setPageContext({ page: "patrimoine" }); }, [setPageContext]);
 
   useEffect(() => {
     Promise.all([

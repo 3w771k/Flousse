@@ -2,6 +2,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import DonutChart from "@/components/DonutChart";
 import CashflowSection from "@/components/CashflowSection";
+import { useChatContext } from "@/components/ChatContext";
 
 const fe = (n: number) =>
   new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(n);
@@ -93,6 +94,7 @@ export default function DashboardPage() {
   const [reclassifyingId, setReclassifyingId] = useState<string | null>(null);
   const [reclassifyOpenId, setReclassifyOpenId] = useState<string | null>(null);
 
+  const { setPageContext } = useChatContext();
   const range = useMemo(() => getDateRange(PERIODS[periodIdx].months, offset), [periodIdx, offset]);
 
   // Reset offset when period type changes
@@ -125,6 +127,10 @@ export default function DashboardPage() {
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  useEffect(() => {
+    setPageContext({ page: "dashboard", period: { from: range.from, to: range.to }, explorerCatId: explorerCatId ?? undefined });
+  }, [setPageContext, range, explorerCatId]);
 
   const fetchBudgetSuggestions = useCallback(async () => {
     setBudgetAILoading(true);

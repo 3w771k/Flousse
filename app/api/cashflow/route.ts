@@ -16,17 +16,18 @@ export async function GET(req: NextRequest) {
     const ownerParams = owner ? [owner] : [];
 
     // C1: Include ALL transaction types — transfers counted as outflows
+    // Exclude vir-interne (internal family transfers) — they just move money between accounts
     const rows = db.prepare(`
       SELECT
         substr(t.date, 1, 7) as month,
         SUM(CASE WHEN c.type = 'income' THEN t.amount ELSE 0 END) as revenus,
         SUM(CASE WHEN c.type = 'expense' THEN ABS(t.amount) ELSE 0 END) as depenses,
         SUM(CASE WHEN c.type = 'dette' THEN ABS(t.amount) ELSE 0 END) as credits,
-        SUM(CASE WHEN c.type = 'transfer' AND t.amount < 0 THEN ABS(t.amount) ELSE 0 END) as transferts
+        SUM(CASE WHEN c.type = 'transfer' AND t.amount < 0 AND t.category_id != 'vir-interne' THEN ABS(t.amount) ELSE 0 END) as transferts
       FROM transactions t
       JOIN categories c ON c.id = t.category_id
       ${ownerJoin}
-      WHERE 1=1 ${ownerWhere}
+      WHERE t.category_id != 'vir-interne' ${ownerWhere}
       GROUP BY month
       ORDER BY month DESC
       LIMIT ?

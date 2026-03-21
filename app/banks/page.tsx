@@ -2,6 +2,7 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useChatContext } from "@/components/ChatContext";
+import ChatButton from "@/components/ChatButton";
 
 const fe = (n: number) =>
   new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(n);
@@ -100,9 +101,12 @@ export default function PatrimoinePage() {
           <span style={{ fontSize: 20, fontWeight: 300, color: totalAll >= 0 ? "#34C759" : "#FF3B30", letterSpacing: "-0.5px" }}>
             Solde net {fe2(totalAll)}
           </span>
-          <Link href="/settings" style={{ marginLeft: "auto", fontSize: 12, color: "#007AFF", textDecoration: "none" }}>
-            Gérer dans Paramètres →
-          </Link>
+          <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 12 }}>
+            <Link href="/settings" style={{ fontSize: 12, color: "#007AFF", textDecoration: "none" }}>
+              Gérer dans Paramètres →
+            </Link>
+            <ChatButton />
+          </span>
         </div>
       </div>
 

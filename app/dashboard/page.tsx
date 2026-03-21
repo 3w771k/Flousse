@@ -3,6 +3,7 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import DonutChart from "@/components/DonutChart";
 import CashflowSection from "@/components/CashflowSection";
 import { useChatContext } from "@/components/ChatContext";
+import ChatButton from "@/components/ChatButton";
 
 const fe = (n: number) =>
   new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(n);
@@ -313,6 +314,7 @@ export default function DashboardPage() {
               <button key={p.label} onClick={() => handlePeriodChange(i)} className={`pill-item ${periodIdx === i ? "active" : ""}`}>{p.label}</button>
             ))}
           </div>
+          <ChatButton />
         </div>
       </div>
 

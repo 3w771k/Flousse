@@ -1,6 +1,7 @@
 "use client";
 import { useState, useEffect, useCallback } from "react";
 import { useChatContext } from "@/components/ChatContext";
+import ChatButton from "@/components/ChatButton";
 
 const fe = (n: number) =>
   new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" }).format(n);
@@ -164,6 +165,7 @@ export default function TransactionsPage() {
             )}
           </div>
         </div>
+        <ChatButton />
       </div>
 
       {/* Month picker */}

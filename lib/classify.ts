@@ -138,8 +138,14 @@ const BUILTIN_RULES: BuiltinRule[] = [
   { pattern: "ECHEANCE PRET.*62043046", categoryId: "pret-perso", regex: true },
   { pattern: "ECHEANCE PRET", categoryId: "credit-immo" },
 
-  // ── Virements internes ──
-  { pattern: "COMPTE JOINT", categoryId: "vir-joint", maxAmount: 0 },
+  // ── Virements internes (sortants ET entrants) ──
+  { pattern: "COMPTE JOINT", categoryId: "vir-joint" },
+  { pattern: "VIR.*M WAZEN CHRISTOPHER", categoryId: "vir-interne", regex: true },
+  { pattern: "VIR.*MME AUDE WAZEN", categoryId: "vir-interne", regex: true },
+  { pattern: "VIR.*AUDE GARNIER", categoryId: "vir-interne", regex: true },
+  { pattern: "VIR DE MME AUDE WAZEN", categoryId: "vir-interne" },
+  { pattern: "VIR INST MME AUDE WAZEN", categoryId: "vir-interne" },
+  { pattern: "VIR.*WAZEN COMPT", categoryId: "vir-interne", regex: true },
   { pattern: "EFFORT PRET IMMOBILIER", categoryId: "vir-immo" },
   { pattern: "REMISE A FLOT", categoryId: "vir-immo" },
   { pattern: "MISE SECURITE", categoryId: "vir-immo" },

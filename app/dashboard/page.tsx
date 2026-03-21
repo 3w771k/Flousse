@@ -26,6 +26,7 @@ const CAT_COLORS: Record<string, string> = {
   "finances-admin": "#AEAEB2", divers: "#AEAEB2",
   revenus: "#34C759", salaire: "#007AFF", loyers: "#FF9500",
   allocations: "#5AC8FA", remboursements: "#AF52DE", "autre-revenu": "#5856D6",
+  transferts: "#AF52DE", "vir-interne": "#AF52DE", "vir-joint": "#9B59B6", "vir-immo": "#8E44AD",
 };
 
 type Transaction = {
@@ -283,6 +284,11 @@ export default function DashboardPage() {
     } else if (cat.type === "dette") debt += abs;
     else if (cat.type === "transfer" && t.amount < 0) {
       transfers += abs;
+      // Include outgoing transfers in expense breakdown so they appear in category list
+      const pId = cat.parent_id || cat.id;
+      byParentExp[pId] = (byParentExp[pId] || 0) + abs;
+      if (!bySubExp[pId]) bySubExp[pId] = {};
+      bySubExp[pId][t.category_id] = (bySubExp[pId][t.category_id] || 0) + abs;
     } else if (cat.type === "expense") {
       expense += abs;
       const pId = cat.parent_id || cat.id;
@@ -377,8 +383,8 @@ export default function DashboardPage() {
           { label: months > 1 ? "Revenus (total)" : "Revenus", value: income, color: "#34C759", sub: months > 1 ? `${months} mois · moy. ${fek(income / months)}/mois` : "Salaires + allocations" },
           { label: months > 1 ? "Dépensé (total)" : "Dépensé", value: expense, color: "#FF3B30", sub: months > 1 ? `moy. ${fek(expense / months)}/mois` : "Hors crédits" },
           { label: "Reste à vivre", value: net, color: net >= 0 ? "#34C759" : "#FF3B30", sub: months > 1
-            ? `moy. ${fek(net / months)}/mois · crédits ${fe(debt)}${transfers > 0 ? ` · transferts ${fe(transfers)}` : ""}`
-            : `${debt > 0 ? `crédits ${fe(debt)}` : ""}${debt > 0 && transfers > 0 ? " · " : ""}${transfers > 0 ? `transferts ${fe(transfers)}` : ""}${debt === 0 && transfers === 0 ? "après crédits et transferts" : ""}` },
+            ? `moy. ${fek(net / months)}/mois · crédits ${fe(debt)}${transfers > 0 ? ` · virements ${fe(transfers)}` : ""}`
+            : `après crédits ${fe(debt)}${transfers > 0 ? ` + virements ${fe(transfers)}` : ""}` },
         ].map((item, i) => (
           <div key={item.label} style={{ display: "contents" }}>
             {i > 0 && <div style={{ background: "rgba(0,0,0,0.04)", width: 1 }} />}

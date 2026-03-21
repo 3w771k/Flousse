@@ -379,24 +379,29 @@ export default function DashboardPage() {
       </div>
 
       {/* Hero cards */}
-      <div className="rounded-apple-lg mb-4" style={{ background: "#F5F5F7", display: "grid", gridTemplateColumns: "1fr 1px 1fr 1px 1fr" }}>
-        {[
-          { label: months > 1 ? "Revenus (total)" : "Revenus", value: income, color: "#34C759", sub: months > 1 ? `${months} mois · moy. ${fek(income / months)}/mois` : "Salaires + allocations" },
-          { label: months > 1 ? "Dépensé (total)" : "Dépensé", value: expense, color: "#FF3B30", sub: months > 1 ? `moy. ${fek(expense / months)}/mois` : "Hors crédits" },
-          { label: "Reste à vivre", value: net, color: net >= 0 ? "#34C759" : "#FF3B30", sub: months > 1
-            ? `moy. ${fek(net / months)}/mois · crédits ${fe(debt)}${transfers > 0 ? ` · virements ${fe(transfers)}` : ""}`
-            : `après crédits ${fe(debt)}${transfers > 0 ? ` + virements ${fe(transfers)}` : ""}` },
-        ].map((item, i) => (
-          <div key={item.label} style={{ display: "contents" }}>
-            {i > 0 && <div style={{ background: "rgba(0,0,0,0.04)", width: 1 }} />}
-            <div style={{ padding: "20px 24px" }}>
-              <div style={{ fontSize: 12, fontWeight: 400, color: "#86868B", marginBottom: 8 }}>{item.label}</div>
-              <div className="hero-amount" style={{ color: item.color, marginBottom: 6 }}>{fek(item.value)}</div>
-              <div style={{ fontSize: 11, color: "#86868B" }}>{item.sub}</div>
-            </div>
+      {(() => {
+        const cards = [
+          { label: months > 1 ? "Revenus (total)" : "Revenus", value: income, color: "#34C759", sub: months > 1 ? `moy. ${fek(income / months)}/mois` : "Salaires + allocations" },
+          { label: months > 1 ? "Dépensé (total)" : "Dépensé", value: expense, color: "#FF3B30", sub: months > 1 ? `moy. ${fek(expense / months)}/mois` : debt > 0 ? `+ crédits ${fe(debt)}` : "Hors crédits" },
+          ...(transfers > 0 ? [{ label: "Virements", value: transfers, color: "#AF52DE", sub: "Transferts entre comptes" }] : []),
+          { label: "Reste à vivre", value: net, color: net >= 0 ? "#34C759" : "#FF3B30", sub: months > 1 ? `moy. ${fek(net / months)}/mois` : "Après tout" },
+        ];
+        const cols = cards.map(() => "1fr").join(" 1px ");
+        return (
+          <div className="rounded-apple-lg mb-4" style={{ background: "#F5F5F7", display: "grid", gridTemplateColumns: cols }}>
+            {cards.map((item, i) => (
+              <div key={item.label} style={{ display: "contents" }}>
+                {i > 0 && <div style={{ background: "rgba(0,0,0,0.04)", width: 1 }} />}
+                <div style={{ padding: "20px 24px" }}>
+                  <div style={{ fontSize: 12, fontWeight: 400, color: "#86868B", marginBottom: 8 }}>{item.label}</div>
+                  <div className="hero-amount" style={{ color: item.color, marginBottom: 6 }}>{fek(item.value)}</div>
+                  <div style={{ fontSize: 11, color: "#86868B" }}>{item.sub}</div>
+                </div>
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
+        );
+      })()}
 
       {/* Main grid */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 280px", gap: 16 }}>

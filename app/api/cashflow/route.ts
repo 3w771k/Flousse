@@ -8,6 +8,12 @@ export async function GET(req: NextRequest) {
     const db = getDb();
     const { searchParams } = new URL(req.url);
     const months = Math.max(1, Math.min(120, parseInt(searchParams.get("months") || "12") || 12));
+    const owner = searchParams.get("owner");
+
+    // Build optional owner filter (join accounts to filter by owner)
+    const ownerJoin = owner ? " JOIN accounts a ON a.id = t.account_id" : "";
+    const ownerWhere = owner ? " AND a.owner = ?" : "";
+    const ownerParams = owner ? [owner] : [];
 
     // C1: Include ALL transaction types — transfers counted as outflows
     const rows = db.prepare(`
@@ -19,10 +25,12 @@ export async function GET(req: NextRequest) {
         SUM(CASE WHEN c.type = 'transfer' AND t.amount < 0 THEN ABS(t.amount) ELSE 0 END) as transferts
       FROM transactions t
       JOIN categories c ON c.id = t.category_id
+      ${ownerJoin}
+      WHERE 1=1 ${ownerWhere}
       GROUP BY month
       ORDER BY month DESC
       LIMIT ?
-    `).all(months) as {
+    `).all(...ownerParams, months) as {
       month: string; revenus: number; depenses: number; credits: number; transferts: number;
     }[];
 
@@ -64,7 +72,7 @@ export async function GET(req: NextRequest) {
       let projCumul = cumulData[cumulData.length - 1]?.solde || 0;
       for (let i = 1; i <= 6; i++) {
         const d = new Date(ly, lm - 1 + i, 1);
-        const rawMonth = d.toISOString().slice(0, 7);
+        const rawMonth = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
         projCumul += Math.round(avgSolde);
         projection.push({
           month: formatMonth(rawMonth),

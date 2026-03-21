@@ -466,7 +466,7 @@ export default function DashboardPage() {
       </div>
 
       {/* Cashflow section */}
-      <CashflowSection />
+      <CashflowSection owner={ownerFilter} />
 
       {/* Task 3 — Category Explorer slide-over */}
       {explorerCatId && (() => {

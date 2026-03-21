@@ -18,7 +18,7 @@ type CashflowRow = {
 };
 type CumulRow = { month: string; raw_month: string; solde: number };
 
-export default function CashflowSection() {
+export default function CashflowSection({ owner }: { owner?: string }) {
   const [view, setView] = useState("Barres");
   const [simplified, setSimplified] = useState(true);
   const [data, setData] = useState<CashflowRow[]>([]);
@@ -29,7 +29,9 @@ export default function CashflowSection() {
 
   const loadData = useCallback(async () => {
     try {
-      const res = await fetch("/api/cashflow?months=12");
+      const params = new URLSearchParams({ months: "12" });
+      if (owner && owner !== "all") params.set("owner", owner);
+      const res = await fetch(`/api/cashflow?${params}`);
       if (!res.ok) { setLoading(false); return; }
       const json = await res.json();
       setData(json.data || []);
@@ -40,7 +42,7 @@ export default function CashflowSection() {
       console.error("Cashflow: load error", err);
     }
     setLoading(false);
-  }, []);
+  }, [owner]);
 
   useEffect(() => { loadData(); }, [loadData]);
 

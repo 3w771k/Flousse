@@ -242,9 +242,9 @@ export default function SettingsPage() {
     setBudgetSuggestions([]);
     try {
       const now = new Date();
-      const to = now.toISOString().slice(0, 10);
+      const to = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
       const fromDate = new Date(now.getFullYear(), now.getMonth() - 6, 1);
-      const from = fromDate.toISOString().slice(0, 10);
+      const from = `${fromDate.getFullYear()}-${String(fromDate.getMonth() + 1).padStart(2, "0")}-${String(fromDate.getDate()).padStart(2, "0")}`;
       const res = await fetch("/api/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },

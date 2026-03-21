@@ -35,6 +35,10 @@ type Account = { id: string; name: string; bank: string; owner?: string };
 
 const OWNER_LABELS: Record<string, string> = { all: "Tous", moi: "Moi", elle: "Elle", commun: "Commun", enfant: "Enfants" };
 
+function localDateStr(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
 // D1 — offset-aware date range: offset=0 → current period, offset=1 → previous, etc.
 function getDateRange(months: number, offset: number): { from: string; to: string; label: string } {
   const now = new Date();
@@ -75,8 +79,8 @@ function getDateRange(months: number, offset: number): { from: string; to: strin
   }
 
   return {
-    from: fromDate.toISOString().slice(0, 10),
-    to: toDate.toISOString().slice(0, 10),
+    from: localDateStr(fromDate),
+    to: localDateStr(toDate),
     label,
   };
 }
@@ -144,9 +148,9 @@ export default function DashboardPage() {
     setBudgetAILoading(true);
     try {
       const now = new Date();
-      const to = now.toISOString().slice(0, 10);
+      const to = localDateStr(now);
       const fromDate = new Date(now.getFullYear(), now.getMonth() - 6, 1);
-      const from = fromDate.toISOString().slice(0, 10);
+      const from = localDateStr(fromDate);
       const res = await fetch("/api/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -198,8 +202,8 @@ export default function DashboardPage() {
     const historyData: { month: string; total: number }[] = [];
     for (let i = 5; i >= 0; i--) {
       const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      const mFrom = d.toISOString().slice(0, 10);
-      const mTo = new Date(d.getFullYear(), d.getMonth() + 1, 0).toISOString().slice(0, 10);
+      const mFrom = localDateStr(d);
+      const mTo = localDateStr(new Date(d.getFullYear(), d.getMonth() + 1, 0));
       const mRes = await fetch(`/api/transactions?from=${mFrom}&to=${mTo}&categoryId=${catId}`);
       if (mRes.ok) {
         const mTxs: Transaction[] = await mRes.json();

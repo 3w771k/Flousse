@@ -79,7 +79,7 @@ function formatMonthLabel(month: string): string {
 function shiftMonth(month: string, delta: number): string {
   const [y, m] = month.split("-").map(Number);
   const d = new Date(y, m - 1 + delta);
-  return d.toISOString().slice(0, 7);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 }
 
 export default function TransactionsPage() {
@@ -87,7 +87,7 @@ export default function TransactionsPage() {
   const [ownerFilter, setOwnerFilter] = useState("all");
   const [accountFilter, setAccountFilter] = useState("all");
   const [categoryFilter, setCategoryFilter] = useState("all");
-  const [selectedMonth, setSelectedMonth] = useState<string | null>(new Date().toISOString().slice(0, 7));
+  const [selectedMonth, setSelectedMonth] = useState<string | null>(`${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}`);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [txs, setTxs] = useState<Transaction[]>([]);
   const [cats, setCats] = useState<Map<string, Category>>(new Map());
@@ -205,7 +205,7 @@ export default function TransactionsPage() {
         )}
         {selectedMonth === null && (
           <button
-            onClick={() => setSelectedMonth(new Date().toISOString().slice(0, 7))}
+            onClick={() => setSelectedMonth(`${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}`)}
             style={{ background: "none", border: "none", cursor: "pointer", fontSize: 12, color: "#007AFF" }}
           >
             Mois en cours

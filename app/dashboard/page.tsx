@@ -257,7 +257,7 @@ export default function DashboardPage() {
   const filteredTxs = useMemo(() => ownerAccountIds ? txs.filter((t) => ownerAccountIds.has(t.account_id)) : txs, [txs, ownerAccountIds]);
   const availableOwners = useMemo(() => [...new Set(accounts.map((a) => a.owner).filter((o): o is string => !!o))], [accounts]);
 
-  const [viewMode, setViewMode] = useState<"depenses" | "revenus">("depenses");
+  const [viewMode, setViewMode] = useState<"depenses" | "revenus" | "transferts">("depenses");
 
   // Compute stats
   let income = 0, expense = 0, debt = 0, transfers = 0;
@@ -265,6 +265,8 @@ export default function DashboardPage() {
   const bySubExp: Record<string, Record<string, number>> = {};
   const byParentInc: Record<string, number> = {};
   const bySubInc: Record<string, Record<string, number>> = {};
+  const byParentTrf: Record<string, number> = {};
+  const bySubTrf: Record<string, Record<string, number>> = {};
   const months = PERIODS[periodIdx].months;
   // Same rule as cashflow: vir-interne excluded for "Tous", included for per-person
   const includeVirInterne = ownerFilter !== "all";
@@ -284,11 +286,10 @@ export default function DashboardPage() {
     } else if (cat.type === "dette") debt += abs;
     else if (cat.type === "transfer" && t.amount < 0) {
       transfers += abs;
-      // Include outgoing transfers in expense breakdown so they appear in category list
       const pId = cat.parent_id || cat.id;
-      byParentExp[pId] = (byParentExp[pId] || 0) + abs;
-      if (!bySubExp[pId]) bySubExp[pId] = {};
-      bySubExp[pId][t.category_id] = (bySubExp[pId][t.category_id] || 0) + abs;
+      byParentTrf[pId] = (byParentTrf[pId] || 0) + abs;
+      if (!bySubTrf[pId]) bySubTrf[pId] = {};
+      bySubTrf[pId][t.category_id] = (bySubTrf[pId][t.category_id] || 0) + abs;
     } else if (cat.type === "expense") {
       expense += abs;
       const pId = cat.parent_id || cat.id;
@@ -299,8 +300,8 @@ export default function DashboardPage() {
   });
 
   const net = income - expense - debt - transfers;
-  const byParent = viewMode === "depenses" ? byParentExp : byParentInc;
-  const bySub = viewMode === "depenses" ? bySubExp : bySubInc;
+  const byParent = viewMode === "depenses" ? byParentExp : viewMode === "revenus" ? byParentInc : byParentTrf;
+  const bySub = viewMode === "depenses" ? bySubExp : viewMode === "revenus" ? bySubInc : bySubTrf;
   const topParents = Object.entries(byParent)
     .sort((a, b) => b[1] - a[1])
     .map(([id, total]) => ({ cat: cats.get(id), total, subs: bySub[id] || {} }))
@@ -405,6 +406,9 @@ export default function DashboardPage() {
             <div className="pill-group">
               <button onClick={() => setViewMode("depenses")} className={`pill-item ${viewMode === "depenses" ? "active" : ""}`}>Dépenses</button>
               <button onClick={() => setViewMode("revenus")} className={`pill-item ${viewMode === "revenus" ? "active" : ""}`}>Revenus</button>
+              {transfers > 0 && (
+                <button onClick={() => setViewMode("transferts")} className={`pill-item ${viewMode === "transferts" ? "active" : ""}`}>Transferts</button>
+              )}
             </div>
             {viewMode === "depenses" && (
               <button
@@ -488,7 +492,7 @@ export default function DashboardPage() {
           <div className="rounded-apple" style={{ background: "#F5F5F7", padding: "20px 24px" }}>
             <div className="section-label mb-4">Répartition</div>
             <div style={{ display: "flex", justifyContent: "center" }}>
-              <DonutChart segments={donutSegments} size={140} strokeWidth={10} centerLabel={fek(viewMode === "depenses" ? expense : income)} centerSub={viewMode === "depenses" ? "dépenses" : "revenus"} />
+              <DonutChart segments={donutSegments} size={140} strokeWidth={10} centerLabel={fek(viewMode === "depenses" ? expense : viewMode === "revenus" ? income : transfers)} centerSub={viewMode === "depenses" ? "dépenses" : viewMode === "revenus" ? "revenus" : "transferts"} />
             </div>
             <div style={{ marginTop: 16, display: "flex", flexDirection: "column", gap: 6 }}>
               {donutSegments.map((seg, i) => (

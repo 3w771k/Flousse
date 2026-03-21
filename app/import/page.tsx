@@ -67,7 +67,7 @@ export default function ImportPage() {
 
     try {
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 180_000); // 3 min max
+      const timeout = setTimeout(() => controller.abort(), 600_000); // 10 min max
 
       const res = await fetch("/api/import", { method: "POST", body: formData, signal: controller.signal });
       clearTimeout(timeout);
@@ -84,7 +84,7 @@ export default function ImportPage() {
     } catch (err) {
       stopTimer();
       if (err instanceof DOMException && err.name === "AbortError") {
-        setError("L'analyse a pris trop de temps (>3 min). Essayez avec un fichier plus petit ou vérifiez votre clé API.");
+        setError("L'analyse a pris trop de temps (>10 min). Essayez avec un fichier plus petit ou vérifiez votre clé API.");
       } else {
         setError("Erreur réseau — vérifiez que le serveur est démarré.");
       }

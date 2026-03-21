@@ -316,8 +316,8 @@ function getApiKey(db: Database): string | null {
   return row?.value || process.env.ANTHROPIC_API_KEY || null;
 }
 
-const BATCH_SIZE = 25;
-const CONCURRENCY = 5;
+const BATCH_SIZE = 50;
+const CONCURRENCY = 8;
 
 // Classify a batch of transactions with Claude
 export async function classifyWithClaude(
@@ -398,7 +398,7 @@ async function classifyBatch(
 
     const message = await client.messages.create({
       model: "claude-sonnet-4-6",
-      max_tokens: 4096,
+      max_tokens: 8192,
       messages: [
         {
           role: "user",

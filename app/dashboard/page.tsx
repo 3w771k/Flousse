@@ -380,11 +380,12 @@ export default function DashboardPage() {
 
       {/* Hero cards */}
       {(() => {
+        const totalDepense = expense + debt;
         const cards = [
           { label: months > 1 ? "Revenus (total)" : "Revenus", value: income, color: "#34C759", sub: months > 1 ? `moy. ${fek(income / months)}/mois` : "Salaires + allocations" },
-          { label: months > 1 ? "Dépensé (total)" : "Dépensé", value: expense, color: "#FF3B30", sub: months > 1 ? `moy. ${fek(expense / months)}/mois` : debt > 0 ? `+ crédits ${fe(debt)}` : "Hors crédits" },
-          ...(transfers > 0 ? [{ label: "Virements", value: transfers, color: "#AF52DE", sub: "Transferts entre comptes" }] : []),
-          { label: "Reste à vivre", value: net, color: net >= 0 ? "#34C759" : "#FF3B30", sub: months > 1 ? `moy. ${fek(net / months)}/mois` : "Après tout" },
+          { label: months > 1 ? "Dépensé (total)" : "Dépensé", value: totalDepense, color: "#FF3B30", sub: debt > 0 ? `dont crédits ${fe(debt)}` : months > 1 ? `moy. ${fek(totalDepense / months)}/mois` : "Charges courantes" },
+          ...(transfers > 0 ? [{ label: "Virements", value: transfers, color: "#FF9500", sub: "Transferts sortants" }] : []),
+          { label: "Reste à vivre", value: net, color: net >= 0 ? "#34C759" : "#FF3B30", sub: months > 1 ? `moy. ${fek(net / months)}/mois` : transfers > 0 ? `${fek(income)} − ${fek(totalDepense)} − ${fek(transfers)}` : `${fek(income)} − ${fek(totalDepense)}` },
         ];
         const cols = cards.map(() => "1fr").join(" 1px ");
         return (

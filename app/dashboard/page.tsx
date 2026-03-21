@@ -24,6 +24,8 @@ const CAT_COLORS: Record<string, string> = {
   transports: "#AF52DE", voyages: "#007AFF", "shopping-loisirs": "#5856D6",
   "abonnements-telecom": "#86868B", logement: "#FF9500", "cadeaux-dons": "#FF6482",
   "finances-admin": "#AEAEB2", divers: "#AEAEB2",
+  revenus: "#34C759", salaire: "#007AFF", loyers: "#FF9500",
+  allocations: "#5AC8FA", remboursements: "#AF52DE", "autre-revenu": "#5856D6",
 };
 
 type Transaction = {
@@ -248,28 +250,39 @@ export default function DashboardPage() {
   const filteredTxs = useMemo(() => ownerAccountIds ? txs.filter((t) => ownerAccountIds.has(t.account_id)) : txs, [txs, ownerAccountIds]);
   const availableOwners = useMemo(() => [...new Set(accounts.map((a) => a.owner).filter((o): o is string => !!o))], [accounts]);
 
+  const [viewMode, setViewMode] = useState<"depenses" | "revenus">("depenses");
+
   // Compute stats
   let income = 0, expense = 0, debt = 0;
-  const byParent: Record<string, number> = {};
-  const bySub: Record<string, Record<string, number>> = {};
+  const byParentExp: Record<string, number> = {};
+  const bySubExp: Record<string, Record<string, number>> = {};
+  const byParentInc: Record<string, number> = {};
+  const bySubInc: Record<string, Record<string, number>> = {};
   const months = PERIODS[periodIdx].months;
 
   filteredTxs.forEach((t) => {
     const cat = cats.get(t.category_id);
     if (!cat) return;
     const abs = Math.abs(t.amount);
-    if (cat.type === "income") income += abs;
-    else if (cat.type === "dette") debt += abs;
+    if (cat.type === "income") {
+      income += abs;
+      const pId = cat.parent_id || cat.id;
+      byParentInc[pId] = (byParentInc[pId] || 0) + abs;
+      if (!bySubInc[pId]) bySubInc[pId] = {};
+      bySubInc[pId][t.category_id] = (bySubInc[pId][t.category_id] || 0) + abs;
+    } else if (cat.type === "dette") debt += abs;
     else if (cat.type === "expense") {
       expense += abs;
       const pId = cat.parent_id || cat.id;
-      byParent[pId] = (byParent[pId] || 0) + abs;
-      if (!bySub[pId]) bySub[pId] = {};
-      bySub[pId][t.category_id] = (bySub[pId][t.category_id] || 0) + abs;
+      byParentExp[pId] = (byParentExp[pId] || 0) + abs;
+      if (!bySubExp[pId]) bySubExp[pId] = {};
+      bySubExp[pId][t.category_id] = (bySubExp[pId][t.category_id] || 0) + abs;
     }
   });
 
   const net = income - expense - debt;
+  const byParent = viewMode === "depenses" ? byParentExp : byParentInc;
+  const bySub = viewMode === "depenses" ? bySubExp : bySubInc;
   const topParents = Object.entries(byParent)
     .sort((a, b) => b[1] - a[1])
     .map(([id, total]) => ({ cat: cats.get(id), total, subs: bySub[id] || {} }))
@@ -369,17 +382,22 @@ export default function DashboardPage() {
         {/* Category breakdown */}
         <div className="rounded-apple" style={{ background: "#F5F5F7", padding: "20px 24px" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }} className="mb-4">
-            <div className="section-label">Dépenses par catégorie</div>
-            <button
-              onClick={fetchBudgetSuggestions}
-              disabled={budgetAILoading}
-              style={{ fontSize: 11, color: budgetAILoading ? "#AEAEB2" : "#AF52DE", background: "none", border: "none", cursor: budgetAILoading ? "default" : "pointer", fontWeight: 500 }}
-            >
-              {budgetAILoading ? "Calcul IA…" : "Budgets par IA"}
-            </button>
+            <div className="pill-group">
+              <button onClick={() => setViewMode("depenses")} className={`pill-item ${viewMode === "depenses" ? "active" : ""}`}>Dépenses</button>
+              <button onClick={() => setViewMode("revenus")} className={`pill-item ${viewMode === "revenus" ? "active" : ""}`}>Revenus</button>
+            </div>
+            {viewMode === "depenses" && (
+              <button
+                onClick={fetchBudgetSuggestions}
+                disabled={budgetAILoading}
+                style={{ fontSize: 11, color: budgetAILoading ? "#AEAEB2" : "#AF52DE", background: "none", border: "none", cursor: budgetAILoading ? "default" : "pointer", fontWeight: 500 }}
+              >
+                {budgetAILoading ? "Calcul IA…" : "Budgets par IA"}
+              </button>
+            )}
           </div>
 
-          {budgetSuggestions.length > 0 && (
+          {viewMode === "depenses" && budgetSuggestions.length > 0 && (
             <div style={{ marginBottom: 16, borderRadius: 10, border: "1px solid rgba(175,82,222,0.15)", background: "rgba(175,82,222,0.04)", overflow: "hidden" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", borderBottom: "1px solid rgba(175,82,222,0.1)" }}>
                 <span style={{ fontSize: 12, fontWeight: 500, color: "#AF52DE" }}>Suggestions IA</span>
@@ -423,12 +441,12 @@ export default function DashboardPage() {
                   <span style={{ flex: 1, fontSize: 14, color: "#1D1D1F" }}>{cat!.name}</span>
                   <span style={{ fontSize: 10, color: "#AEAEB2" }}>›</span>
                   <div style={{ textAlign: "right" }}>
-                    <span style={{ fontSize: 16, fontWeight: 500, color: overBudget ? "#FF3B30" : "#1D1D1F" }}>{fe(total)}</span>
-                    {budget != null && <span style={{ fontSize: 11, color: overBudget ? "#FF3B30" : "#86868B", display: "block" }}>/{fe(budget)}</span>}
+                    <span style={{ fontSize: 16, fontWeight: 500, color: viewMode === "depenses" && overBudget ? "#FF3B30" : "#1D1D1F" }}>{fe(total)}</span>
+                    {viewMode === "depenses" && budget != null && <span style={{ fontSize: 11, color: overBudget ? "#FF3B30" : "#86868B", display: "block" }}>/{fe(budget)}</span>}
                   </div>
                 </button>
 
-                {budget != null && (
+                {viewMode === "depenses" && budget != null && (
                   <div style={{ height: 3, background: "rgba(0,0,0,0.04)", borderRadius: 2, margin: "0 0 4px 20px" }}>
                     <div style={{
                       height: 3, borderRadius: 2, width: `${Math.min(pct || 0, 100)}%`,
@@ -450,7 +468,7 @@ export default function DashboardPage() {
           <div className="rounded-apple" style={{ background: "#F5F5F7", padding: "20px 24px" }}>
             <div className="section-label mb-4">Répartition</div>
             <div style={{ display: "flex", justifyContent: "center" }}>
-              <DonutChart segments={donutSegments} size={140} strokeWidth={10} centerLabel={fek(expense)} centerSub="dépenses" />
+              <DonutChart segments={donutSegments} size={140} strokeWidth={10} centerLabel={fek(viewMode === "depenses" ? expense : income)} centerSub={viewMode === "depenses" ? "dépenses" : "revenus"} />
             </div>
             <div style={{ marginTop: 16, display: "flex", flexDirection: "column", gap: 6 }}>
               {donutSegments.map((seg, i) => (

@@ -195,9 +195,15 @@ export default function DashboardPage() {
     setExplorerTxs([]);
     setExplorerHistory([]);
 
+    // Build owner account IDs for filtering
+    const oIds = ownerFilter !== "all"
+      ? new Set(accounts.filter((a) => a.owner === ownerFilter).map((a) => a.id))
+      : null;
+    const filterByOwner = (txList: Transaction[]) => oIds ? txList.filter((t) => oIds.has(t.account_id)) : txList;
+
     // Fetch transactions for this category in current period
     const txRes = await fetch(`/api/transactions?from=${range.from}&to=${range.to}&categoryId=${catId}`);
-    if (txRes.ok) setExplorerTxs(await txRes.json());
+    if (txRes.ok) setExplorerTxs(filterByOwner(await txRes.json()));
 
     // Fetch 6-month history
     const now = new Date();
@@ -208,7 +214,7 @@ export default function DashboardPage() {
       const mTo = localDateStr(new Date(d.getFullYear(), d.getMonth() + 1, 0));
       const mRes = await fetch(`/api/transactions?from=${mFrom}&to=${mTo}&categoryId=${catId}`);
       if (mRes.ok) {
-        const mTxs: Transaction[] = await mRes.json();
+        const mTxs: Transaction[] = filterByOwner(await mRes.json());
         const total = mTxs.reduce((s, t) => s + Math.abs(t.amount), 0);
         historyData.push({ month: d.toLocaleDateString("fr-FR", { month: "short" }), total });
       }
@@ -228,7 +234,7 @@ export default function DashboardPage() {
         setExplorerInsight(JSON.parse(insData.content));
       }
     } catch { /* ignore */ }
-  }, [range]);
+  }, [range, ownerFilter, accounts]);
 
   const reclassifyTransaction = async (txId: string, newCatId: string) => {
     setReclassifyingId(txId);

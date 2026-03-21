@@ -31,6 +31,9 @@ type Transaction = {
   amount: number; category_id: string; confidence: number; source: string;
 };
 type Category = { id: string; name: string; type: string; parent_id: string | null; budget: number | null; icon?: string };
+type Account = { id: string; name: string; bank: string; owner?: string };
+
+const OWNER_LABELS: Record<string, string> = { all: "Tous", moi: "Moi", elle: "Elle", commun: "Commun", enfant: "Enfants" };
 
 // D1 — offset-aware date range: offset=0 → current period, offset=1 → previous, etc.
 function getDateRange(months: number, offset: number): { from: string; to: string; label: string } {
@@ -83,6 +86,8 @@ export default function DashboardPage() {
   const [offset, setOffset] = useState(0);
   const [txs, setTxs] = useState<Transaction[]>([]);
   const [cats, setCats] = useState<Map<string, Category>>(new Map());
+  const [accounts, setAccounts] = useState<Account[]>([]);
+  const [ownerFilter, setOwnerFilter] = useState("all");
   const [loading, setLoading] = useState(true);
   const [budgetSuggestions, setBudgetSuggestions] = useState<{ category_id: string; suggested_budget: number; reasoning: string }[]>([]);
   const [budgetAILoading, setBudgetAILoading] = useState(false);
@@ -107,18 +112,20 @@ export default function DashboardPage() {
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const [txRes, catRes] = await Promise.all([
+      const [txRes, catRes, accRes] = await Promise.all([
         fetch(`/api/transactions?from=${range.from}&to=${range.to}`),
         fetch("/api/categories"),
+        fetch("/api/accounts"),
       ]);
-      if (!txRes.ok || !catRes.ok) {
+      if (!txRes.ok || !catRes.ok || !accRes.ok) {
         console.error("Dashboard: API error", txRes.status, catRes.status);
         setLoading(false);
         return;
       }
-      const [txData, catData]: [Transaction[], Category[]] = await Promise.all([txRes.json(), catRes.json()]);
+      const [txData, catData, accData]: [Transaction[], Category[], Account[]] = await Promise.all([txRes.json(), catRes.json(), accRes.json()]);
       setTxs(txData);
       setCats(new Map(catData.map((c) => [c.id, c])));
+      setAccounts(accData);
     } catch (err) {
       console.error("Dashboard: load error", err);
     }
@@ -229,13 +236,21 @@ export default function DashboardPage() {
     loadData();
   };
 
+  // Filter by owner
+  const ownerAccountIds = useMemo(() => {
+    if (ownerFilter === "all") return null;
+    return new Set(accounts.filter((a) => a.owner === ownerFilter).map((a) => a.id));
+  }, [ownerFilter, accounts]);
+  const filteredTxs = useMemo(() => ownerAccountIds ? txs.filter((t) => ownerAccountIds.has(t.account_id)) : txs, [txs, ownerAccountIds]);
+  const availableOwners = useMemo(() => [...new Set(accounts.map((a) => a.owner).filter((o): o is string => !!o))], [accounts]);
+
   // Compute stats
   let income = 0, expense = 0, debt = 0;
   const byParent: Record<string, number> = {};
   const bySub: Record<string, Record<string, number>> = {};
   const months = PERIODS[periodIdx].months;
 
-  txs.forEach((t) => {
+  filteredTxs.forEach((t) => {
     const cat = cats.get(t.category_id);
     if (!cat) return;
     const abs = Math.abs(t.amount);
@@ -314,6 +329,15 @@ export default function DashboardPage() {
               <button key={p.label} onClick={() => handlePeriodChange(i)} className={`pill-item ${periodIdx === i ? "active" : ""}`}>{p.label}</button>
             ))}
           </div>
+          {availableOwners.length > 1 && (
+            <div className="pill-group">
+              {["all", ...availableOwners].map((o) => (
+                <button key={o} onClick={() => setOwnerFilter(o)} className={`pill-item ${ownerFilter === o ? "active" : ""}`}>
+                  {OWNER_LABELS[o] || o}
+                </button>
+              ))}
+            </div>
+          )}
           <ChatButton />
         </div>
       </div>

@@ -25,7 +25,9 @@ type Transaction = {
   amount: number; category_id: string; confidence: number;
 };
 type Category = { id: string; name: string; type: string; parent_id: string | null };
-type Account = { id: string; name: string; bank: string };
+type Account = { id: string; name: string; bank: string; owner?: string };
+
+const OWNER_LABELS: Record<string, string> = { all: "Tous propriétaires", moi: "Moi", elle: "Elle", commun: "Commun", enfant: "Enfants" };
 
 function CategoryDot({ id }: { id: string }) {
   const color = CAT_COLORS[id] || "#AEAEB2";
@@ -82,6 +84,7 @@ function shiftMonth(month: string, delta: number): string {
 
 export default function TransactionsPage() {
   const [search, setSearch] = useState("");
+  const [ownerFilter, setOwnerFilter] = useState("all");
   const [accountFilter, setAccountFilter] = useState("all");
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [selectedMonth, setSelectedMonth] = useState<string | null>(new Date().toISOString().slice(0, 7));
@@ -145,7 +148,10 @@ export default function TransactionsPage() {
 
   const expenseParents = Array.from(cats.values()).filter((c) => !c.parent_id);
   const expenseCatParents = expenseParents.filter((c) => ["expense", "income", "transfer", "dette"].includes(c.type));
-  const unclassified = txs.filter((t) => t.category_id === "divers").length;
+  const availableOwners = [...new Set(accounts.map((a) => a.owner).filter((o): o is string => !!o))];
+  const ownerAccountIds = ownerFilter === "all" ? null : new Set(accounts.filter((a) => a.owner === ownerFilter).map((a) => a.id));
+  const filteredTxs = ownerAccountIds ? txs.filter((t) => ownerAccountIds.has(t.account_id)) : txs;
+  const unclassified = filteredTxs.filter((t) => t.category_id === "divers").length;
 
   const AM = new Map(accounts.map((a) => [a.id, a]));
 
@@ -218,6 +224,31 @@ export default function TransactionsPage() {
             style={{ width: "100%", padding: "8px 14px", borderRadius: 8, border: "none", background: "#F5F5F7", fontSize: 13, color: "#1D1D1F", outline: "none" }}
           />
         </div>
+        {availableOwners.length > 1 && (
+          <div style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
+            <select
+              value={ownerFilter}
+              onChange={(e) => setOwnerFilter(e.target.value)}
+              style={{
+                appearance: "none", WebkitAppearance: "none",
+                padding: "8px 32px 8px 12px",
+                borderRadius: 8, border: "none",
+                background: ownerFilter !== "all" ? "rgba(175,82,222,0.08)" : "rgba(0,0,0,0.04)",
+                fontSize: 12, cursor: "pointer",
+                color: ownerFilter === "all" ? "#86868B" : "#AF52DE",
+                fontWeight: ownerFilter === "all" ? 400 : 500,
+                outline: "none",
+              }}
+              onMouseEnter={(e) => (e.currentTarget.style.background = ownerFilter !== "all" ? "rgba(175,82,222,0.12)" : "rgba(0,0,0,0.07)")}
+              onMouseLeave={(e) => (e.currentTarget.style.background = ownerFilter !== "all" ? "rgba(175,82,222,0.08)" : "rgba(0,0,0,0.04)")}
+            >
+              {["all", ...availableOwners].map((o) => (
+                <option key={o} value={o}>{OWNER_LABELS[o] || o}</option>
+              ))}
+            </select>
+            <span style={{ position: "absolute", right: 10, pointerEvents: "none", color: ownerFilter === "all" ? "#86868B" : "#AF52DE", fontSize: 10 }}>▾</span>
+          </div>
+        )}
         <div style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
           <select
             value={accountFilter}
@@ -262,7 +293,7 @@ export default function TransactionsPage() {
           </select>
           <span style={{ position: "absolute", right: 10, pointerEvents: "none", color: "#86868B", fontSize: 10 }}>▾</span>
         </div>
-        <span style={{ fontSize: 12, color: "#AEAEB2", whiteSpace: "nowrap" }}>{txs.length} opérations</span>
+        <span style={{ fontSize: 12, color: "#AEAEB2", whiteSpace: "nowrap" }}>{filteredTxs.length} opérations</span>
       </div>
 
       {/* List */}
@@ -272,7 +303,7 @@ export default function TransactionsPage() {
         </div>
       ) : (
         <div className="rounded-apple" style={{ background: "#F5F5F7", padding: "4px 20px" }}>
-          {txs.map((t) => {
+          {filteredTxs.map((t) => {
             const cat = cats.get(t.category_id);
             const parentCat = cat?.parent_id ? cats.get(cat.parent_id) : null;
             const acct = AM.get(t.account_id);
@@ -314,7 +345,7 @@ export default function TransactionsPage() {
               </div>
             );
           })}
-          {txs.length === 0 && (
+          {filteredTxs.length === 0 && (
             <div style={{ padding: "24px 0", textAlign: "center", fontSize: 13, color: "#AEAEB2" }}>
               Aucune transaction trouvée
             </div>

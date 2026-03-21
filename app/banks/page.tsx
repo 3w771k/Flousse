@@ -17,8 +17,10 @@ const fek = (n: number) =>
 
 type Account = {
   id: string; name: string; bank: string; icon: string;
-  type: string; balance: number;
+  type: string; balance: number; owner?: string;
 };
+
+const OWNER_LABELS: Record<string, string> = { all: "Tous", moi: "Moi", elle: "Elle", commun: "Commun", enfant: "Enfants" };
 
 type Settings = Record<string, string>;
 
@@ -63,6 +65,7 @@ function RepaymentBar({ paid, total }: { paid: number; total: number }) {
 export default function PatrimoinePage() {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [settings, setSettings] = useState<Settings>({});
+  const [ownerFilter, setOwnerFilter] = useState("all");
   const [loading, setLoading] = useState(true);
   const { setPageContext } = useChatContext();
 
@@ -79,16 +82,19 @@ export default function PatrimoinePage() {
       .finally(() => setLoading(false));
   }, []);
 
-  const liquidites = accounts.filter((a) => a.type === "liquidites").reduce((s, a) => s + a.balance, 0);
-  const epargne = accounts.filter((a) => a.type === "epargne" || a.type === "bourse").reduce((s, a) => s + a.balance, 0);
-  const creditsTotal = accounts.filter((a) => a.type === "credit").reduce((s, a) => s + Math.abs(a.balance), 0);
+  const availableOwners = [...new Set(accounts.map((a) => a.owner).filter((o): o is string => !!o))];
+  const fa = ownerFilter === "all" ? accounts : accounts.filter((a) => a.owner === ownerFilter);
+
+  const liquidites = fa.filter((a) => a.type === "liquidites").reduce((s, a) => s + a.balance, 0);
+  const epargne = fa.filter((a) => a.type === "epargne" || a.type === "bourse").reduce((s, a) => s + a.balance, 0);
+  const creditsTotal = fa.filter((a) => a.type === "credit").reduce((s, a) => s + Math.abs(a.balance), 0);
   const immoSci = parseFloat(settings["immo_sci"] || "0");
   const immoLille40 = parseFloat(settings["immo_lille40"] || "0");
   const immoLille19 = parseFloat(settings["immo_lille19"] || "0");
-  const immobilier = immoSci + immoLille40 + immoLille19;
+  const immobilier = ownerFilter === "all" ? immoSci + immoLille40 + immoLille19 : 0;
   const patrimoineNet = liquidites + epargne + immobilier - creditsTotal;
-  const banks = [...new Set(accounts.map((a) => a.bank))];
-  const totalAll = accounts.reduce((s, a) => s + a.balance, 0);
+  const banks = [...new Set(fa.map((a) => a.bank))];
+  const totalAll = fa.reduce((s, a) => s + a.balance, 0);
 
   return (
     <div style={{ padding: "28px 36px", maxWidth: 1100 }}>
@@ -108,6 +114,15 @@ export default function PatrimoinePage() {
             <ChatButton />
           </span>
         </div>
+        {availableOwners.length > 1 && (
+          <div className="pill-group" style={{ marginTop: 10 }}>
+            {["all", ...availableOwners].map((o) => (
+              <button key={o} onClick={() => setOwnerFilter(o)} className={`pill-item ${ownerFilter === o ? "active" : ""}`}>
+                {OWNER_LABELS[o] || o}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       {loading ? (
@@ -142,7 +157,7 @@ export default function PatrimoinePage() {
           {/* Bank totals */}
           <div style={{ display: "grid", gridTemplateColumns: `repeat(${banks.length}, 1fr)`, gap: 12, marginBottom: 24 }}>
             {banks.map((bank) => {
-              const accts = accounts.filter((a) => a.bank === bank);
+              const accts = fa.filter((a) => a.bank === bank);
               const total = accts.reduce((s, a) => s + a.balance, 0);
               return (
                 <div key={bank} className="rounded-apple" style={{ background: "#F5F5F7", padding: "16px 20px" }}>
@@ -156,7 +171,7 @@ export default function PatrimoinePage() {
 
           {/* Per bank — account cards (read-only) */}
           {banks.map((bank) => {
-            const accts = accounts.filter((a) => a.bank === bank);
+            const accts = fa.filter((a) => a.bank === bank);
             return (
               <div key={bank} style={{ marginBottom: 24 }}>
                 <div className="section-label mb-3">{bank}</div>

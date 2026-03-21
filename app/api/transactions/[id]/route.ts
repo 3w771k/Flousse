@@ -15,7 +15,13 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     }
 
     const { categoryId, learnPattern } = body;
-    if (!categoryId) return NextResponse.json({ error: "categoryId required" }, { status: 400 });
+    if (!categoryId || typeof categoryId !== "string") {
+      return NextResponse.json({ error: "categoryId required" }, { status: 400 });
+    }
+
+    // Validate category exists
+    const cat = db.prepare("SELECT id FROM categories WHERE id = ?").get(categoryId);
+    if (!cat) return NextResponse.json({ error: "Catégorie inexistante" }, { status: 400 });
 
     // Update transaction
     db.prepare("UPDATE transactions SET category_id = ?, confidence = 1.0, source = 'manual' WHERE id = ?")

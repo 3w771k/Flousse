@@ -8,6 +8,19 @@ type ThinkingBlock = { type: "thinking"; thinking: string };
 type TextBlock = { type: "text"; text: string };
 type ContentBlock = ThinkingBlock | TextBlock;
 
+/** Strip dangerous HTML tags/attributes from Claude output */
+function sanitizeHtml(html: string): string {
+  return html
+    .replace(/<script[\s\S]*?<\/script>/gi, "")
+    .replace(/<iframe[\s\S]*?<\/iframe>/gi, "")
+    .replace(/<object[\s\S]*?<\/object>/gi, "")
+    .replace(/<embed[\s\S]*?>/gi, "")
+    .replace(/<link[\s\S]*?>/gi, "")
+    .replace(/\bon\w+\s*=/gi, "data-removed=")
+    .replace(/javascript\s*:/gi, "")
+    .replace(/<style[\s\S]*?<\/style>/gi, "");
+}
+
 function getApiKey(): string | null {
   const db = getDb();
   const row = db.prepare("SELECT value FROM settings WHERE key = 'claude_api_key'").get() as { value: string } | undefined;
@@ -578,12 +591,19 @@ export async function POST(req: NextRequest) {
 
       // Validate JSON — wrap in fallback insight if broken
       try {
-        JSON.parse(jsonContent);
+        const parsed = JSON.parse(jsonContent);
+        // Sanitize body fields in insight objects
+        if (Array.isArray(parsed)) {
+          for (const item of parsed) {
+            if (item.body) item.body = sanitizeHtml(item.body);
+          }
+          jsonContent = JSON.stringify(parsed);
+        }
       } catch {
         jsonContent = JSON.stringify([{
           type: "info",
           title: "Analyse disponible",
-          body: jsonContent.slice(0, 300),
+          body: sanitizeHtml(jsonContent.slice(0, 300)),
           metric: null,
         }]);
       }
@@ -714,6 +734,9 @@ export async function POST(req: NextRequest) {
       .replace(/^```\s*/, "")
       .replace(/```\s*$/, "")
       .trim();
+
+    // Sanitize HTML — strip dangerous tags
+    html = sanitizeHtml(html);
 
     // Store in DB (upsert)
     db.prepare(`

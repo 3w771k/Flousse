@@ -115,6 +115,37 @@ export default function SettingsPage() {
     }
   };
 
+  const [showAddAccount, setShowAddAccount] = useState(false);
+  const [newAccount, setNewAccount] = useState({ name: "", bank: "", type: "liquidites", icon: "💳", owner: "commun" });
+  const [addAccountError, setAddAccountError] = useState("");
+
+  const addAccount = async () => {
+    setAddAccountError("");
+    const id = newAccount.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "").slice(0, 50);
+    if (!id || !newAccount.name || !newAccount.bank) {
+      setAddAccountError("Nom et banque requis");
+      return;
+    }
+    const res = await fetch("/api/accounts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id, name: newAccount.name, bank: newAccount.bank, type: newAccount.type, icon: newAccount.icon, balance: 0 }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      setAddAccountError(data.error || "Erreur création");
+      return;
+    }
+    // Set owner
+    await fetch(`/api/accounts/${id}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ owner: newAccount.owner }),
+    });
+    setNewAccount({ name: "", bank: "", type: "liquidites", icon: "💳", owner: "commun" });
+    setShowAddAccount(false);
+    loadData();
+  };
+
   const deleteAccount = async (id: string) => {
     const prev = accounts;
     setAccounts((a) => a.filter((x) => x.id !== id));
@@ -347,7 +378,67 @@ export default function SettingsPage() {
             <div>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
                 <div className="section-label">Comptes bancaires ({accounts.length})</div>
+                <button
+                  onClick={() => setShowAddAccount(!showAddAccount)}
+                  style={{ fontSize: 12, fontWeight: 500, color: "#007AFF", background: "none", border: "none", cursor: "pointer" }}
+                >
+                  {showAddAccount ? "Annuler" : "+ Ajouter un compte"}
+                </button>
               </div>
+              {showAddAccount && (
+                <div className="rounded-apple" style={{ background: "#F5F5F7", padding: "16px 18px", marginBottom: 16 }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
+                    <input
+                      placeholder="Nom du compte"
+                      value={newAccount.name}
+                      onChange={(e) => setNewAccount({ ...newAccount, name: e.target.value })}
+                      style={{ padding: "8px 12px", borderRadius: 8, border: "1px solid rgba(0,0,0,0.1)", background: "white", fontSize: 13, outline: "none" }}
+                    />
+                    <input
+                      placeholder="Banque"
+                      value={newAccount.bank}
+                      onChange={(e) => setNewAccount({ ...newAccount, bank: e.target.value })}
+                      style={{ padding: "8px 12px", borderRadius: 8, border: "1px solid rgba(0,0,0,0.1)", background: "white", fontSize: 13, outline: "none" }}
+                    />
+                    <select
+                      value={newAccount.type}
+                      onChange={(e) => setNewAccount({ ...newAccount, type: e.target.value })}
+                      style={{ padding: "8px 12px", borderRadius: 8, border: "1px solid rgba(0,0,0,0.1)", background: "white", fontSize: 13, outline: "none" }}
+                    >
+                      <option value="liquidites">Liquidités</option>
+                      <option value="epargne">Épargne</option>
+                      <option value="credit">Crédit</option>
+                      <option value="carte">Carte différée</option>
+                      <option value="bourse">Bourse</option>
+                    </select>
+                    <select
+                      value={newAccount.owner}
+                      onChange={(e) => setNewAccount({ ...newAccount, owner: e.target.value })}
+                      style={{ padding: "8px 12px", borderRadius: 8, border: "1px solid rgba(0,0,0,0.1)", background: "white", fontSize: 13, outline: "none" }}
+                    >
+                      <option value="moi">Moi</option>
+                      <option value="elle">Elle</option>
+                      <option value="commun">Commun</option>
+                      <option value="enfant">Enfant</option>
+                    </select>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <input
+                      placeholder="Icône (emoji)"
+                      value={newAccount.icon}
+                      onChange={(e) => setNewAccount({ ...newAccount, icon: e.target.value })}
+                      style={{ width: 80, padding: "8px 12px", borderRadius: 8, border: "1px solid rgba(0,0,0,0.1)", background: "white", fontSize: 13, outline: "none", textAlign: "center" }}
+                    />
+                    <button
+                      onClick={addAccount}
+                      style={{ padding: "8px 20px", borderRadius: 8, border: "none", background: "#007AFF", color: "white", fontSize: 13, fontWeight: 500, cursor: "pointer" }}
+                    >
+                      Créer
+                    </button>
+                    {addAccountError && <span style={{ fontSize: 12, color: "#FF3B30" }}>{addAccountError}</span>}
+                  </div>
+                </div>
+              )}
               {accounts.map((a) => (
                 <div key={a.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 0", borderBottom: "1px solid rgba(0,0,0,0.04)" }}>
                   <span style={{ fontSize: 16 }}>{a.icon}</span>

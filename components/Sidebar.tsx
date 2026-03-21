@@ -2,6 +2,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState, useEffect } from "react";
+import { useChatContext } from "./ChatContext";
 
 const NAV = [
   {
@@ -26,17 +27,8 @@ const NAV = [
     ),
   },
   {
-    href: "/cashflow",
-    label: "Cash-flow",
-    icon: (
-      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-        <polyline points="1,11 5,7 8,9 12,4 15,6"/>
-      </svg>
-    ),
-  },
-  {
     href: "/banks",
-    label: "Banques",
+    label: "Patrimoine",
     icon: (
       <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
         <path d="M1 6l7-4 7 4"/>
@@ -60,12 +52,13 @@ const NAV = [
   },
 ];
 
-const AI_NAV = {
+const HISTORY_NAV = {
   href: "/analysis",
-  label: "Analyse IA",
+  label: "Historique IA",
   icon: (
     <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M8 1l1.5 3 3.5.5-2.5 2.5.5 3.5L8 9l-3 1.5.5-3.5L3 4.5l3.5-.5z"/>
+      <circle cx="8" cy="8" r="6"/>
+      <path d="M8 4v4l2.5 2.5"/>
     </svg>
   ),
 };
@@ -112,6 +105,7 @@ function formatPatrimoine(n: number): string {
 
 export default function Sidebar() {
   const [patrimoine, setPatrimoine] = useState<{ patrimoineNet: number; totalImmo: number } | null>(null);
+  const { toggleChat, isOpen: chatOpen } = useChatContext();
 
   useEffect(() => {
     fetch("/api/patrimoine")
@@ -141,10 +135,33 @@ export default function Sidebar() {
           <NavItem key={item.href} {...item} />
         ))}
 
-        {/* Divider before AI */}
+        {/* Divider */}
         <div style={{ height: 1, background: "rgba(0,0,0,0.04)", margin: "8px 18px" }} />
 
-        <NavItem {...AI_NAV} />
+        {/* Chat IA button */}
+        <button
+          onClick={toggleChat}
+          className="flex items-center gap-3 py-2 px-3 rounded-apple-sm mr-2 transition-colors"
+          style={{
+            background: chatOpen ? "rgba(175,82,222,0.08)" : "transparent",
+            color: chatOpen ? "#AF52DE" : "#86868B",
+            fontWeight: chatOpen ? 500 : 400,
+            fontSize: 13,
+            border: "none",
+            cursor: "pointer",
+            textAlign: "left",
+            width: "100%",
+          }}
+        >
+          <span style={{ color: chatOpen ? "#AF52DE" : "#86868B", opacity: chatOpen ? 1 : 0.55 }}>
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M8 1l1.5 3 3.5.5-2.5 2.5.5 3.5L8 9l-3 1.5.5-3.5L3 4.5l3.5-.5z"/>
+            </svg>
+          </span>
+          Chat IA
+        </button>
+
+        <NavItem {...HISTORY_NAV} />
       </nav>
 
       {/* Bottom: settings + patrimoine */}

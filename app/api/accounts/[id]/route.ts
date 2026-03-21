@@ -17,24 +17,28 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   try {
     const db = getDb();
     const { id } = await params;
-    let body: { actual_balance?: number };
+    let body: { actual_balance?: number; owner?: string };
     try {
       body = await req.json();
     } catch {
       return NextResponse.json({ error: "JSON invalide" }, { status: 400 });
     }
 
-    const { actual_balance } = body;
+    const { actual_balance, owner } = body;
     if (actual_balance !== undefined) {
-      // seed_balance = actual_balance - SUM(transactions)
-      // so that balance = seed_balance + SUM(transactions) = actual_balance
       const sumRow = db.prepare(
         "SELECT COALESCE(SUM(amount), 0) as total FROM transactions WHERE account_id = ?"
       ).get(id) as { total: number };
       const seedBalance = actual_balance - sumRow.total;
-
       db.prepare("UPDATE accounts SET balance = ?, seed_balance = ? WHERE id = ?")
         .run(actual_balance, seedBalance, id);
+    }
+    if (owner !== undefined) {
+      const VALID_OWNERS = ["moi", "elle", "commun", "enfant"];
+      if (!VALID_OWNERS.includes(owner)) {
+        return NextResponse.json({ error: "Owner invalide" }, { status: 400 });
+      }
+      db.prepare("UPDATE accounts SET owner = ? WHERE id = ?").run(owner, id);
     }
     return NextResponse.json({ ok: true });
   } catch (err) {

@@ -218,6 +218,17 @@ function initSchema(db: Database.Database) {
     console.log(`[db] v4 migration: created "energie" category, moved ${moved.changes} transactions`);
   }
 
+  // ── v5: Add owner column to accounts ──
+  const accCols5 = db.prepare("PRAGMA table_info(accounts)").all() as { name: string }[];
+  if (!accCols5.some((c) => c.name === "owner")) {
+    db.exec("ALTER TABLE accounts ADD COLUMN owner TEXT NOT NULL DEFAULT 'commun'");
+    // Set known owners
+    db.prepare("UPDATE accounts SET owner = 'moi' WHERE id IN ('hb-perso', 'ccf-perso', 'ccf-ldds', 'ccf-pea')").run();
+    db.prepare("UPDATE accounts SET owner = 'commun' WHERE id IN ('ccf-joint', 'amex', 'hb-immo', 'hb-cautions', 'hb-impots', 'hb-credit1', 'hb-credit2', 'hb-pretperso')").run();
+    db.prepare("UPDATE accounts SET owner = 'enfant' WHERE id IN ('hb-adele', 'hb-gabrielle', 'hb-livretA-adele', 'hb-livretA-gabrielle')").run();
+    console.log("[db] v5 migration: added owner column to accounts");
+  }
+
   // Seed if empty
   const count = (db.prepare("SELECT COUNT(*) as n FROM categories").get() as { n: number }).n;
   if (count === 0) seedDb(db);

@@ -1,13 +1,14 @@
 "use client";
 import { useState, useEffect, useCallback } from "react";
 
-type Account = { id: string; name: string; bank: string; icon: string; type: string; balance: number };
+type Account = { id: string; name: string; bank: string; icon: string; type: string; balance: number; owner?: string };
 type Category = { id: string; name: string; type: string; icon: string; parent_id: string | null; budget: number | null };
 type Rule = { id: number; pattern: string; category_id: string; category_name: string; use_count: number };
 
-type Section = "accounts" | "categories" | "rules" | "patrimoine" | "context" | "api" | "export" | "reclassify" | "reset";
+type Section = "accounts" | "balances" | "categories" | "rules" | "patrimoine" | "context" | "api" | "export" | "reclassify" | "reset";
 const SECTIONS: { id: Section; label: string }[] = [
   { id: "accounts", label: "Comptes" },
+  { id: "balances", label: "Soldes" },
   { id: "categories", label: "Catégories" },
   { id: "rules", label: "Règles apprises" },
   { id: "patrimoine", label: "Patrimoine immobilier" },
@@ -354,9 +355,65 @@ export default function SettingsPage() {
                     <div style={{ fontSize: 13, fontWeight: 500, color: "#1D1D1F" }}>{a.name}</div>
                     <div style={{ fontSize: 11, color: "#86868B" }}>{a.bank}</div>
                   </div>
+                  <select
+                    value={a.owner || "commun"}
+                    onChange={async (e) => {
+                      await fetch(`/api/accounts/${a.id}`, {
+                        method: "PATCH", headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ owner: e.target.value }),
+                      });
+                      loadData();
+                    }}
+                    style={{ fontSize: 11, padding: "4px 8px", borderRadius: 6, border: "1px solid rgba(0,0,0,0.1)", background: "white", color: "#86868B" }}
+                  >
+                    <option value="moi">Moi</option>
+                    <option value="elle">Elle</option>
+                    <option value="commun">Commun</option>
+                    <option value="enfant">Enfant</option>
+                  </select>
                   <button onClick={() => deleteAccount(a.id)} style={{ fontSize: 11, color: "#FF3B30", background: "none", border: "none", cursor: "pointer" }}>Supprimer</button>
                 </div>
               ))}
+            </div>
+          )}
+
+          {section === "balances" && (
+            <div>
+              <div className="section-label" style={{ marginBottom: 8 }}>Soldes des comptes</div>
+              <div style={{ fontSize: 12, color: "#86868B", marginBottom: 20 }}>Cliquez sur un solde pour le corriger manuellement.</div>
+              {accounts.map((a) => {
+                const fe2 = (n: number) => new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 2 }).format(n);
+                return (
+                  <div key={a.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 0", borderBottom: "1px solid rgba(0,0,0,0.04)" }}>
+                    <span style={{ fontSize: 16 }}>{a.icon}</span>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 13, fontWeight: 500, color: "#1D1D1F" }}>{a.name}</div>
+                      <div style={{ fontSize: 11, color: "#86868B" }}>{a.bank}</div>
+                    </div>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      defaultValue={a.balance.toFixed(2)}
+                      onBlur={async (e) => {
+                        const val = parseFloat(e.target.value.replace(/[^\d.,-]/g, "").replace(",", "."));
+                        if (isNaN(val) || val === a.balance) return;
+                        await fetch(`/api/accounts/${a.id}`, {
+                          method: "PATCH", headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ actual_balance: val }),
+                        });
+                        loadData();
+                      }}
+                      onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+                      style={{
+                        fontSize: 14, fontWeight: 500, width: 120, textAlign: "right",
+                        padding: "4px 8px", borderRadius: 6, border: "1px solid rgba(0,0,0,0.1)",
+                        background: "white", color: a.balance < 0 ? "#FF3B30" : "#1D1D1F", outline: "none",
+                      }}
+                    />
+                    <span style={{ fontSize: 12, color: "#86868B", width: 16 }}>€</span>
+                  </div>
+                );
+              })}
             </div>
           )}
 

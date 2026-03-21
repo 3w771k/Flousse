@@ -1,6 +1,5 @@
 "use client";
-import { useState, useEffect, useCallback, useMemo } from "react";
-import InsightsBanner from "@/components/InsightsBanner";
+import { useState, useEffect, useCallback } from "react";
 
 const fe = (n: number) =>
   new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" }).format(n);
@@ -89,16 +88,6 @@ export default function TransactionsPage() {
   const [cats, setCats] = useState<Map<string, Category>>(new Map());
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [loading, setLoading] = useState(true);
-
-  // Compute from/to for InsightsBanner
-  const { from: insightsFrom, to: insightsTo } = useMemo(() => {
-    const month = selectedMonth || new Date().toISOString().slice(0, 7);
-    const [y, m] = month.split("-").map(Number);
-    const from = `${y}-${String(m).padStart(2, "0")}-01`;
-    const lastDay = new Date(y, m, 0).getDate();
-    const to = `${y}-${String(m).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
-    return { from, to };
-  }, [selectedMonth]);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -267,9 +256,6 @@ export default function TransactionsPage() {
         </div>
         <span style={{ fontSize: 12, color: "#AEAEB2", whiteSpace: "nowrap" }}>{txs.length} opérations</span>
       </div>
-
-      {/* InsightsBanner */}
-      <InsightsBanner tab="transactions" from={insightsFrom} to={insightsTo} />
 
       {/* List */}
       {loading ? (

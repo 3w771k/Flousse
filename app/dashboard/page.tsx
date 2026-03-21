@@ -1,7 +1,7 @@
 "use client";
 import { useState, useEffect, useCallback, useMemo } from "react";
-import InsightsBanner from "@/components/InsightsBanner";
 import DonutChart from "@/components/DonutChart";
+import CashflowSection from "@/components/CashflowSection";
 
 const fe = (n: number) =>
   new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(n);
@@ -28,7 +28,7 @@ type Transaction = {
   id: string; account_id: string; date: string; label: string;
   amount: number; category_id: string; confidence: number; source: string;
 };
-type Category = { id: string; name: string; type: string; parent_id: string | null; budget: number | null };
+type Category = { id: string; name: string; type: string; parent_id: string | null; budget: number | null; icon?: string };
 
 // D1 — offset-aware date range: offset=0 → current period, offset=1 → previous, etc.
 function getDateRange(months: number, offset: number): { from: string; to: string; label: string } {
@@ -91,6 +91,7 @@ export default function DashboardPage() {
   const [explorerInsight, setExplorerInsight] = useState<{ type: string; title: string; body: string; metric: string | null }[] | null>(null);
   const [explorerLoading, setExplorerLoading] = useState(false);
   const [reclassifyingId, setReclassifyingId] = useState<string | null>(null);
+  const [reclassifyOpenId, setReclassifyOpenId] = useState<string | null>(null);
 
   const range = useMemo(() => getDateRange(PERIODS[periodIdx].months, offset), [periodIdx, offset]);
 
@@ -327,9 +328,6 @@ export default function DashboardPage() {
         ))}
       </div>
 
-      {/* D4 — InsightsBanner between hero cards and categories */}
-      <InsightsBanner tab="dashboard" from={range.from} to={range.to} />
-
       {/* Main grid */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 280px", gap: 16 }}>
         {/* Category breakdown */}
@@ -431,6 +429,9 @@ export default function DashboardPage() {
         </div>
       </div>
 
+      {/* Cashflow section */}
+      <CashflowSection />
+
       {/* Task 3 — Category Explorer slide-over */}
       {explorerCatId && (() => {
         const eCat = cats.get(explorerCatId);
@@ -438,8 +439,6 @@ export default function DashboardPage() {
         const eSubEntries = Object.entries(bySub[explorerCatId] || {}).sort((a, b) => b[1] - a[1]);
         const eTotal = byParent[explorerCatId] || 0;
         const histMax = Math.max(...explorerHistory.map(h => h.total), 1);
-        const allCats = Array.from(cats.values()).filter(c => c.type === "expense");
-
         return (
           <div style={{ position: "fixed", inset: 0, zIndex: 100, display: "flex", justifyContent: "flex-end" }}>
             <div onClick={() => setExplorerCatId(null)} style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.3)", backdropFilter: "blur(2px)" }} />
@@ -515,36 +514,111 @@ export default function DashboardPage() {
                   </div>
                 )}
 
-                {/* Transaction list */}
-                {explorerTxs.length > 0 && (
-                  <div style={{ borderRadius: 12, background: "white", padding: "16px 18px", border: "1px solid rgba(0,0,0,0.06)" }}>
-                    <div style={{ fontSize: 12, fontWeight: 500, color: "#86868B", marginBottom: 12 }}>Transactions ({explorerTxs.length})</div>
-                    {explorerTxs.slice(0, 50).map((t) => (
-                      <div key={t.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0", borderBottom: "1px solid rgba(0,0,0,0.04)" }}>
-                        <div style={{ flex: 1 }}>
-                          <div style={{ fontSize: 12, color: "#1D1D1F", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 200 }}>{t.label}</div>
-                          <div style={{ fontSize: 10, color: "#AEAEB2" }}>{t.date}</div>
+                {/* Transaction list — grouped by subcategory, sorted by date desc */}
+                {explorerTxs.length > 0 && (() => {
+                  // Build grouped category picker
+                  const expenseParents = Array.from(cats.values()).filter(c => !c.parent_id && c.type === "expense");
+                  const groupedCats = expenseParents.map(p => ({
+                    parent: p,
+                    children: Array.from(cats.values()).filter(c => c.parent_id === p.id),
+                  }));
+
+                  // Group transactions by subcategory
+                  const txBySubcat: Record<string, Transaction[]> = {};
+                  for (const t of explorerTxs) {
+                    const key = t.category_id;
+                    if (!txBySubcat[key]) txBySubcat[key] = [];
+                    txBySubcat[key].push(t);
+                  }
+                  // Sort transactions within each group by date desc
+                  for (const key of Object.keys(txBySubcat)) {
+                    txBySubcat[key].sort((a, b) => b.date.localeCompare(a.date));
+                  }
+                  // Sort groups by total amount desc
+                  const sortedGroups = Object.entries(txBySubcat)
+                    .map(([catId, txList]) => ({
+                      catId,
+                      cat: cats.get(catId),
+                      txList,
+                      total: txList.reduce((s, t) => s + Math.abs(t.amount), 0),
+                    }))
+                    .sort((a, b) => b.total - a.total);
+
+                  return (
+                    <div style={{ borderRadius: 12, background: "white", padding: "16px 18px", border: "1px solid rgba(0,0,0,0.06)" }}>
+                      <div style={{ fontSize: 12, fontWeight: 500, color: "#86868B", marginBottom: 12 }}>Transactions ({explorerTxs.length})</div>
+                      {sortedGroups.map(({ catId, cat: grpCat, txList }) => (
+                        <div key={catId} style={{ marginBottom: 12 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6, padding: "4px 0" }}>
+                            <span style={{ fontSize: 11, fontWeight: 600, color: "#86868B" }}>{grpCat?.icon || "📋"} {grpCat?.name || catId}</span>
+                            <span style={{ fontSize: 10, color: "#AEAEB2" }}>({txList.length})</span>
+                            <span style={{ fontSize: 11, fontWeight: 500, color: "#1D1D1F", marginLeft: "auto" }}>{fe(txList.reduce((s, t) => s + Math.abs(t.amount), 0))}</span>
+                          </div>
+                          {txList.map((t) => {
+                            const txCat = cats.get(t.category_id);
+                            const isOpen = reclassifyOpenId === t.id;
+                            return (
+                              <div key={t.id} style={{ position: "relative", padding: "6px 0 6px 12px", borderBottom: "1px solid rgba(0,0,0,0.03)" }}>
+                                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                  <div style={{ flex: 1, minWidth: 0 }}>
+                                    <div style={{ fontSize: 12, color: "#1D1D1F", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{t.label}</div>
+                                    <div style={{ fontSize: 10, color: "#AEAEB2", marginTop: 1 }}>{t.date}</div>
+                                  </div>
+                                  <span style={{ fontSize: 13, fontWeight: 500, color: "#1D1D1F", flexShrink: 0 }}>{fe(Math.abs(t.amount))}</span>
+                                  <button
+                                    onClick={() => setReclassifyOpenId(isOpen ? null : t.id)}
+                                    disabled={reclassifyingId === t.id}
+                                    style={{
+                                      fontSize: 10, padding: "2px 8px", borderRadius: 6,
+                                      border: "1px solid rgba(0,0,0,0.08)", background: isOpen ? "#F5F5F7" : "white",
+                                      color: "#86868B", cursor: "pointer", flexShrink: 0, maxWidth: 100,
+                                      whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+                                    }}
+                                  >
+                                    {reclassifyingId === t.id ? "…" : "Changer"}
+                                  </button>
+                                </div>
+                                {isOpen && (
+                                  <div style={{
+                                    position: "absolute", right: 0, top: "100%", zIndex: 10,
+                                    width: 260, maxHeight: 320, overflowY: "auto",
+                                    background: "white", borderRadius: 10, boxShadow: "0 4px 20px rgba(0,0,0,0.15)",
+                                    border: "1px solid rgba(0,0,0,0.08)", padding: "6px 0",
+                                  }}>
+                                    {groupedCats.map(({ parent: gp, children: gc }) => (
+                                      <div key={gp.id}>
+                                        <div style={{ fontSize: 10, fontWeight: 600, color: "#86868B", textTransform: "uppercase", letterSpacing: "0.5px", padding: "8px 12px 4px" }}>
+                                          {gp.icon} {gp.name}
+                                        </div>
+                                        {gc.map(c => (
+                                          <button
+                                            key={c.id}
+                                            onClick={() => { setReclassifyOpenId(null); reclassifyTransaction(t.id, c.id); }}
+                                            style={{
+                                              display: "block", width: "100%", textAlign: "left",
+                                              fontSize: 12, padding: "6px 12px 6px 24px", border: "none",
+                                              background: c.id === t.category_id ? "rgba(0,122,255,0.08)" : "transparent",
+                                              color: c.id === t.category_id ? "#007AFF" : "#1D1D1F",
+                                              cursor: "pointer", fontWeight: c.id === t.category_id ? 500 : 400,
+                                            }}
+                                            onMouseEnter={e => { if (c.id !== t.category_id) (e.target as HTMLElement).style.background = "rgba(0,0,0,0.03)"; }}
+                                            onMouseLeave={e => { if (c.id !== t.category_id) (e.target as HTMLElement).style.background = "transparent"; }}
+                                          >
+                                            {c.icon} {c.name}
+                                          </button>
+                                        ))}
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
                         </div>
-                        <span style={{ fontSize: 13, fontWeight: 500, color: "#1D1D1F", minWidth: 60, textAlign: "right" }}>{fe(Math.abs(t.amount))}</span>
-                        <select
-                          value={t.category_id}
-                          onChange={(e) => reclassifyTransaction(t.id, e.target.value)}
-                          disabled={reclassifyingId === t.id}
-                          style={{ fontSize: 10, padding: "2px 4px", borderRadius: 4, border: "1px solid rgba(0,0,0,0.1)", color: "#86868B", maxWidth: 90, background: "white" }}
-                        >
-                          {allCats.map((c) => (
-                            <option key={c.id} value={c.id}>{c.name}</option>
-                          ))}
-                        </select>
-                      </div>
-                    ))}
-                    {explorerTxs.length > 50 && (
-                      <div style={{ fontSize: 11, color: "#AEAEB2", textAlign: "center", padding: "8px 0" }}>
-                        … et {explorerTxs.length - 50} autres
-                      </div>
-                    )}
-                  </div>
-                )}
+                      ))}
+                    </div>
+                  );
+                })()}
               </div>
             </div>
           </div>

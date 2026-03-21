@@ -20,6 +20,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Seuls les fichiers CSV sont acceptés" }, { status: 400 });
     }
 
+    // Max 10MB
+    if (file.size > 10 * 1024 * 1024) {
+      return NextResponse.json({ error: "Fichier trop volumineux (max 10 Mo)" }, { status: 413 });
+    }
+
     const account = db.prepare("SELECT id FROM accounts WHERE id = ?").get(accountId);
     if (!account) return NextResponse.json({ error: "account not found" }, { status: 404 });
 

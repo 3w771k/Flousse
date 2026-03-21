@@ -175,7 +175,7 @@ export default function DashboardPage() {
     setExplorerHistory([]);
 
     // Fetch transactions for this category in current period
-    const txRes = await fetch(`/api/transactions?from=${range.from}&to=${range.to}&category=${catId}`);
+    const txRes = await fetch(`/api/transactions?from=${range.from}&to=${range.to}&categoryId=${catId}`);
     if (txRes.ok) setExplorerTxs(await txRes.json());
 
     // Fetch 6-month history
@@ -185,7 +185,7 @@ export default function DashboardPage() {
       const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
       const mFrom = d.toISOString().slice(0, 10);
       const mTo = new Date(d.getFullYear(), d.getMonth() + 1, 0).toISOString().slice(0, 10);
-      const mRes = await fetch(`/api/transactions?from=${mFrom}&to=${mTo}&category=${catId}`);
+      const mRes = await fetch(`/api/transactions?from=${mFrom}&to=${mTo}&categoryId=${catId}`);
       if (mRes.ok) {
         const mTxs: Transaction[] = await mRes.json();
         const total = mTxs.reduce((s, t) => s + Math.abs(t.amount), 0);
@@ -372,7 +372,10 @@ export default function DashboardPage() {
           )}
 
           {topParents.map(({ cat, total, subs }) => {
-            const budget = cat!.budget ? cat!.budget * months : null;
+            // Parent budget = sum of children budgets
+            const children = Array.from(cats.values()).filter(c => c.parent_id === cat!.id);
+            const childBudgetSum = children.reduce((s, c) => s + (c.budget || 0), 0);
+            const budget = childBudgetSum > 0 ? childBudgetSum * months : null;
             const pct = budget ? Math.min((total / budget) * 100, 120) : null;
             const color = CAT_COLORS[cat!.id] || "#AEAEB2";
             const overBudget = pct != null && pct > 100;

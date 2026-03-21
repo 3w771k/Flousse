@@ -22,9 +22,18 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: "JSON invalide" }, { status: 400 });
     }
     const updates: { id: string; budget: number }[] = Array.isArray(body) ? body : [body];
+    // Validate each update
+    for (const u of updates) {
+      if (typeof u.id !== "string" || !/^[a-z0-9-]+$/.test(u.id)) {
+        return NextResponse.json({ error: `ID invalide: ${u.id}` }, { status: 400 });
+      }
+      if (!Number.isFinite(u.budget) || u.budget < 0 || u.budget > 1_000_000) {
+        return NextResponse.json({ error: `Budget invalide: ${u.budget}` }, { status: 400 });
+      }
+    }
     const stmt = db.prepare("UPDATE categories SET budget = ? WHERE id = ?");
     db.transaction(() => {
-      for (const u of updates) stmt.run(u.budget, u.id);
+      for (const u of updates) stmt.run(Math.round(u.budget), u.id);
     })();
     return NextResponse.json({ ok: true });
   } catch (err) {

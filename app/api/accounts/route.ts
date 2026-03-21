@@ -27,6 +27,17 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "id, name, bank, type required" }, { status: 400 });
     }
 
+    const VALID_TYPES = ["liquidites", "epargne", "credit", "carte", "bourse"];
+    if (!VALID_TYPES.includes(type)) {
+      return NextResponse.json({ error: `Type invalide. Valeurs acceptées: ${VALID_TYPES.join(", ")}` }, { status: 400 });
+    }
+    if (typeof name !== "string" || name.length > 100) {
+      return NextResponse.json({ error: "Nom trop long (max 100 caractères)" }, { status: 400 });
+    }
+    if (typeof id !== "string" || !/^[a-z0-9-]+$/.test(id) || id.length > 50) {
+      return NextResponse.json({ error: "ID invalide (a-z, 0-9, tirets, max 50)" }, { status: 400 });
+    }
+
     db.prepare("INSERT INTO accounts (id, name, bank, icon, type, balance) VALUES (?, ?, ?, ?, ?, ?)")
       .run(id, name, bank, icon || "\uD83D\uDCB3", type, balance || 0);
 

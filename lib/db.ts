@@ -176,6 +176,48 @@ function initSchema(db: Database.Database) {
     db.pragma("foreign_keys = ON");
   }
 
+  // ── v3: Clean up ghost categories created by LLM classification ──
+  // The classify prompt used to allow Claude to create new subcategories.
+  // This migration removes those ghost categories and reassigns their transactions to "divers".
+  const ghostCount = (db.prepare(`
+    SELECT COUNT(*) as n FROM categories WHERE icon = '📋' AND id != 'finances-admin'
+  `).get() as { n: number }).n;
+  if (ghostCount > 0) {
+    db.pragma("foreign_keys = OFF");
+    db.transaction(() => {
+      // Reassign transactions pointing to ghost categories → divers
+      db.exec(`
+        UPDATE transactions SET category_id = 'divers'
+        WHERE category_id IN (
+          SELECT id FROM categories WHERE icon = '📋' AND id != 'finances-admin'
+        )
+      `);
+      // Remove rules pointing to ghost categories
+      db.exec(`
+        DELETE FROM rules WHERE category_id IN (
+          SELECT id FROM categories WHERE icon = '📋' AND id != 'finances-admin'
+        )
+      `);
+      // Delete the ghost categories themselves
+      db.exec("DELETE FROM categories WHERE icon = '📋' AND id != 'finances-admin'");
+    })();
+    db.pragma("foreign_keys = ON");
+    console.log(`[db] v3 migration: removed ${ghostCount} ghost categories`);
+  }
+
+  // ── v4: Add "energie" subcategory under logement ──
+  const hasEnergie = db.prepare("SELECT id FROM categories WHERE id = 'energie'").get();
+  if (!hasEnergie) {
+    db.prepare(
+      `INSERT OR IGNORE INTO categories (id, name, type, icon, parent_id, budget, sort_order)
+       VALUES ('energie', 'Énergie (EDF, Engie)', 'expense', '⚡', 'logement', 150, 54)`
+    ).run();
+    // Move transactions assigned directly to parent "logement" → "energie"
+    const moved = db.prepare("UPDATE transactions SET category_id = 'energie' WHERE category_id = 'logement'").run();
+    db.prepare("UPDATE rules SET category_id = 'energie' WHERE category_id = 'logement'").run();
+    console.log(`[db] v4 migration: created "energie" category, moved ${moved.changes} transactions`);
+  }
+
   // Seed if empty
   const count = (db.prepare("SELECT COUNT(*) as n FROM categories").get() as { n: number }).n;
   if (count === 0) seedDb(db);
@@ -201,23 +243,24 @@ function seedDb(db: Database.Database) {
     { id: "pret-perso", name: "Prêt personnel (échéances)", type: "dette", icon: "🏦", parent_id: "credits", budget: null, sort_order: 22 },
     { id: "amex-prlv", name: "Prélèvement Amex", type: "dette", icon: "💎", parent_id: "credits", budget: null, sort_order: 23 },
     // ALIMENTATION
-    { id: "alimentation", name: "Alimentation", type: "expense", icon: "🛒", parent_id: null, budget: 1100, sort_order: 30 },
+    { id: "alimentation", name: "Alimentation", type: "expense", icon: "🛒", parent_id: null, budget: null, sort_order: 30 },
     { id: "courses", name: "Courses & supermarché", type: "expense", icon: "🛒", parent_id: "alimentation", budget: 600, sort_order: 31 },
     { id: "boulangerie", name: "Boulangerie", type: "expense", icon: "🥖", parent_id: "alimentation", budget: 50, sort_order: 32 },
     { id: "resto", name: "Restaurants & sorties", type: "expense", icon: "🍽️", parent_id: "alimentation", budget: 300, sort_order: 33 },
     { id: "livraison", name: "Livraison repas", type: "expense", icon: "🛵", parent_id: "alimentation", budget: 100, sort_order: 34 },
     { id: "snacking", name: "Snacking & distributeurs", type: "expense", icon: "🍫", parent_id: "alimentation", budget: 50, sort_order: 35 },
     // ENFANTS
-    { id: "enfants", name: "Enfants", type: "expense", icon: "👨‍👩‍👧‍👦", parent_id: null, budget: 1500, sort_order: 40 },
+    { id: "enfants", name: "Enfants", type: "expense", icon: "👨‍👩‍👧‍👦", parent_id: null, budget: null, sort_order: 40 },
     { id: "garde", name: "Garde (crèche, Kinougarde, CESU)", type: "expense", icon: "👶", parent_id: "enfants", budget: 1200, sort_order: 41 },
     { id: "enfants-activites", name: "Activités & école", type: "expense", icon: "🎒", parent_id: "enfants", budget: 300, sort_order: 42 },
     // LOGEMENT
-    { id: "logement", name: "Logement", type: "expense", icon: "🏠", parent_id: null, budget: 300, sort_order: 50 },
+    { id: "logement", name: "Logement", type: "expense", icon: "🏠", parent_id: null, budget: null, sort_order: 50 },
     { id: "copro", name: "Copropriété & syndic", type: "expense", icon: "🏢", parent_id: "logement", budget: 150, sort_order: 51 },
     { id: "securite", name: "Sécurité (Verisure)", type: "expense", icon: "🔐", parent_id: "logement", budget: 50, sort_order: 52 },
     { id: "assurance", name: "Assurance habitation", type: "expense", icon: "🛡️", parent_id: "logement", budget: 100, sort_order: 53 },
+    { id: "energie", name: "Énergie (EDF, Engie)", type: "expense", icon: "⚡", parent_id: "logement", budget: 150, sort_order: 54 },
     // TRANSPORTS
-    { id: "transports", name: "Transports", type: "expense", icon: "🚀", parent_id: null, budget: 500, sort_order: 60 },
+    { id: "transports", name: "Transports", type: "expense", icon: "🚀", parent_id: null, budget: null, sort_order: 60 },
     { id: "transport-commun", name: "Transport en commun (Navigo)", type: "expense", icon: "🚇", parent_id: "transports", budget: 100, sort_order: 61 },
     { id: "taxi", name: "Taxi & VTC", type: "expense", icon: "🚕", parent_id: "transports", budget: 100, sort_order: 62 },
     { id: "voiture-recharge", name: "Voiture : recharge électrique", type: "expense", icon: "⚡", parent_id: "transports", budget: 100, sort_order: 63 },
@@ -225,18 +268,18 @@ function seedDb(db: Database.Database) {
     { id: "voiture-parking", name: "Voiture : parking", type: "expense", icon: "🅿️", parent_id: "transports", budget: 50, sort_order: 65 },
     { id: "voiture-carburant", name: "Voiture : carburant & entretien", type: "expense", icon: "⛽", parent_id: "transports", budget: 100, sort_order: 66 },
     // SANTE
-    { id: "sante", name: "Santé", type: "expense", icon: "🏥", parent_id: null, budget: 400, sort_order: 70 },
+    { id: "sante", name: "Santé", type: "expense", icon: "🏥", parent_id: null, budget: null, sort_order: 70 },
     { id: "pharmacie", name: "Pharmacie", type: "expense", icon: "💊", parent_id: "sante", budget: 100, sort_order: 71 },
     { id: "medecin", name: "Médecin & soins médicaux", type: "expense", icon: "🩺", parent_id: "sante", budget: 150, sort_order: 72 },
     { id: "esthetique", name: "Esthétique (coiffeur, esthéticienne)", type: "expense", icon: "✂️", parent_id: "sante", budget: 80, sort_order: 73 },
     { id: "spa", name: "Spa & détente", type: "expense", icon: "🧖", parent_id: "sante", budget: 70, sort_order: 74 },
     // ABONNEMENTS & TELECOM
-    { id: "abonnements-telecom", name: "Abonnements & télécom", type: "expense", icon: "📱", parent_id: null, budget: 180, sort_order: 80 },
+    { id: "abonnements-telecom", name: "Abonnements & télécom", type: "expense", icon: "📱", parent_id: null, budget: null, sort_order: 80 },
     { id: "telecom", name: "Télécom (Bouygues, Free)", type: "expense", icon: "📡", parent_id: "abonnements-telecom", budget: 80, sort_order: 81 },
     { id: "streaming", name: "Streaming & apps", type: "expense", icon: "📺", parent_id: "abonnements-telecom", budget: 60, sort_order: 82 },
     { id: "autres-abonnements", name: "Autres abonnements", type: "expense", icon: "📦", parent_id: "abonnements-telecom", budget: 40, sort_order: 83 },
     // SHOPPING & LOISIRS
-    { id: "shopping-loisirs", name: "Shopping & loisirs", type: "expense", icon: "🛍️", parent_id: null, budget: 600, sort_order: 90 },
+    { id: "shopping-loisirs", name: "Shopping & loisirs", type: "expense", icon: "🛍️", parent_id: null, budget: null, sort_order: 90 },
     { id: "vetements", name: "Vêtements & chaussures", type: "expense", icon: "👗", parent_id: "shopping-loisirs", budget: 150, sort_order: 91 },
     { id: "accessoires", name: "Accessoires", type: "expense", icon: "👜", parent_id: "shopping-loisirs", budget: 50, sort_order: 92 },
     { id: "maison-deco", name: "Maison & déco", type: "expense", icon: "🏡", parent_id: "shopping-loisirs", budget: 100, sort_order: 93 },
@@ -244,16 +287,16 @@ function seedDb(db: Database.Database) {
     { id: "sport", name: "Sport & fitness", type: "expense", icon: "🏃", parent_id: "shopping-loisirs", budget: 50, sort_order: 95 },
     { id: "loisirs", name: "Loisirs & culture", type: "expense", icon: "🎯", parent_id: "shopping-loisirs", budget: 150, sort_order: 96 },
     // VOYAGES
-    { id: "voyages", name: "Voyages & vacances", type: "expense", icon: "✈️", parent_id: null, budget: 5000, sort_order: 100 },
-    { id: "transport-voyage", name: "Billets & transport voyage", type: "expense", icon: "🛫", parent_id: "voyages", budget: null, sort_order: 101 },
-    { id: "hebergement", name: "Hébergement", type: "expense", icon: "🏨", parent_id: "voyages", budget: null, sort_order: 102 },
-    { id: "activites-voyage", name: "Activités & sorties sur place", type: "expense", icon: "🗺️", parent_id: "voyages", budget: null, sort_order: 103 },
+    { id: "voyages", name: "Voyages & vacances", type: "expense", icon: "✈️", parent_id: null, budget: null, sort_order: 100 },
+    { id: "transport-voyage", name: "Billets & transport voyage", type: "expense", icon: "🛫", parent_id: "voyages", budget: 2000, sort_order: 101 },
+    { id: "hebergement", name: "Hébergement", type: "expense", icon: "🏨", parent_id: "voyages", budget: 2000, sort_order: 102 },
+    { id: "activites-voyage", name: "Activités & sorties sur place", type: "expense", icon: "🗺️", parent_id: "voyages", budget: 1000, sort_order: 103 },
     // CADEAUX & DONS
-    { id: "cadeaux-dons", name: "Cadeaux & dons", type: "expense", icon: "🎁", parent_id: null, budget: 200, sort_order: 110 },
+    { id: "cadeaux-dons", name: "Cadeaux & dons", type: "expense", icon: "🎁", parent_id: null, budget: null, sort_order: 110 },
     { id: "cadeaux", name: "Cadeaux", type: "expense", icon: "🎁", parent_id: "cadeaux-dons", budget: 150, sort_order: 111 },
     { id: "dons", name: "Dons & église", type: "expense", icon: "🙏", parent_id: "cadeaux-dons", budget: 50, sort_order: 112 },
     // FINANCES & ADMIN
-    { id: "finances-admin", name: "Finances & admin", type: "expense", icon: "📋", parent_id: null, budget: 100, sort_order: 120 },
+    { id: "finances-admin", name: "Finances & admin", type: "expense", icon: "📋", parent_id: null, budget: null, sort_order: 120 },
     { id: "impots-ir", name: "Impôt sur le revenu", type: "expense", icon: "🏛️", parent_id: "finances-admin", budget: null, sort_order: 121 },
     { id: "taxe-fonciere", name: "Taxe foncière", type: "expense", icon: "🏠", parent_id: "finances-admin", budget: null, sort_order: 122 },
     { id: "amendes", name: "Amendes & PV", type: "expense", icon: "🚨", parent_id: "finances-admin", budget: null, sort_order: 123 },

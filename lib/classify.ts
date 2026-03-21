@@ -240,9 +240,9 @@ const BUILTIN_RULES: BuiltinRule[] = [
   { pattern: "FREE MOBILE", categoryId: "telecom" },
   { pattern: "ORANGE", categoryId: "telecom" },
 
-  // ── Logement (énergie) ──
-  { pattern: "EDF", categoryId: "logement" },
-  { pattern: "ENGIE", categoryId: "logement" },
+  // ── Logement : énergie ──
+  { pattern: "EDF", categoryId: "energie" },
+  { pattern: "ENGIE", categoryId: "energie" },
 
   // ── Retraits DAB ──
   { pattern: "RETRAIT DAB", categoryId: "retraits" },
@@ -316,16 +316,6 @@ function getApiKey(db: Database): string | null {
   return row?.value || process.env.ANTHROPIC_API_KEY || null;
 }
 
-// Slugify a category name into an ID
-function slugify(name: string): string {
-  return name
-    .toLowerCase()
-    .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-|-$/g, "")
-    .slice(0, 40);
-}
-
 const BATCH_SIZE = 25;
 const CONCURRENCY = 5;
 
@@ -368,7 +358,7 @@ export async function classifyWithClaude(
   for (let i = 0; i < batches.length; i += CONCURRENCY) {
     const chunk = batches.slice(i, i + CONCURRENCY);
     const chunkResults = await Promise.all(
-      chunk.map((batch) => classifyBatch(db, batch, catTree, categories, parents, apiKey))
+      chunk.map((batch) => classifyBatch(db, batch, catTree, categories, apiKey))
     );
     chunkResults.forEach((r, j) => { allResults[i + j] = r; });
   }
@@ -397,7 +387,6 @@ async function classifyBatch(
   transactions: TxToClassify[],
   catTree: string,
   categories: { id: string; name: string; type: string; parent_id: string | null; sort_order: number }[],
-  parents: { id: string; name: string; type: string; parent_id: string | null; sort_order: number }[],
   apiKey: string,
 ): Promise<ClassifyResult[]> {
   const txList = transactions
@@ -433,15 +422,15 @@ RÈGLES STRICTES :
 - CPAM/AMELI → remboursements (revenu)
 - Montant positif = revenu (sous "revenus")
 - Montant négatif = dépense
-- Si aucune sous-cat existante ne convient, crée-en une via "newCategory"
-- "divers" = DERNIER RECOURS ABSOLU (retrait DAB inconnu uniquement)
+- Utilise UNIQUEMENT les sous-catégories listées ci-dessus. N'invente JAMAIS de nouvelle catégorie.
+- Si aucune sous-cat ne convient, utilise "divers"
+- "divers" est acceptable pour les transactions vraiment inclassables
 
 Transactions :
 ${txList}
 
 JSON uniquement, tableau :
-[{"id":"...","categoryId":"...","confidence":0.9}]
-Si nouvelle catégorie : ajoute "newCategory":{"name":"...","parentId":"..."}`,
+[{"id":"...","categoryId":"...","confidence":0.9}]`,
         },
       ],
     });
@@ -458,7 +447,6 @@ Si nouvelle catégorie : ajoute "newCategory":{"name":"...","parentId":"..."}`,
       id: string;
       categoryId: string;
       confidence: number;
-      newCategory?: { name: string; parentId: string };
     }[];
 
     try {
@@ -469,7 +457,6 @@ Si nouvelle catégorie : ajoute "newCategory":{"name":"...","parentId":"..."}`,
     }
 
     const validIds = new Set(categories.map((c) => c.id));
-    const parentIds = new Set(parents.map((p) => p.id));
 
     const finalResults: ClassifyResult[] = [];
     const resultMap = new Map(results.map((r) => [r.id, r]));
@@ -482,31 +469,12 @@ Si nouvelle catégorie : ajoute "newCategory":{"name":"...","parentId":"..."}`,
         continue;
       }
 
-      if (r.newCategory && r.newCategory.name && r.newCategory.parentId && parentIds.has(r.newCategory.parentId)) {
-        const newId = slugify(r.newCategory.name);
-        if (!validIds.has(newId)) {
-          const parent = categories.find((c) => c.id === r.newCategory!.parentId)!;
-          const maxSort = db.prepare(
-            "SELECT MAX(sort_order) as m FROM categories WHERE parent_id = ?"
-          ).get(r.newCategory.parentId) as { m: number | null };
-          const sortOrder = (maxSort?.m ?? parent.sort_order ?? 0) + 1;
-
-          db.prepare(
-            `INSERT OR IGNORE INTO categories (id, name, type, icon, parent_id, budget, sort_order)
-             VALUES (?, ?, ?, '📋', ?, NULL, ?)`
-          ).run(newId, r.newCategory.name, parent.type, r.newCategory.parentId, sortOrder);
-
-          validIds.add(newId);
-          console.log(`[classify] New subcategory: ${newId} (${r.newCategory.name}) under ${r.newCategory.parentId}`);
-        }
-        finalResults.push({ id: r.id, categoryId: newId, confidence: Math.max(0, Math.min(1, r.confidence)) });
-      } else {
-        finalResults.push({
-          id: r.id,
-          categoryId: validIds.has(r.categoryId) ? r.categoryId : "divers",
-          confidence: Math.max(0, Math.min(1, r.confidence)),
-        });
-      }
+      // Only accept category IDs that exist in the DB — fallback to "divers"
+      finalResults.push({
+        id: r.id,
+        categoryId: validIds.has(r.categoryId) ? r.categoryId : "divers",
+        confidence: Math.max(0, Math.min(1, r.confidence)),
+      });
     }
 
     return finalResults;

@@ -24,7 +24,8 @@ export async function GET(req: NextRequest) {
     const rows = db.prepare(`
       SELECT
         substr(t.date, 1, 7) as month,
-        SUM(CASE WHEN c.type = 'income' THEN t.amount ELSE 0 END) as revenus,
+        SUM(CASE WHEN c.type = 'income' THEN t.amount ELSE 0 END)
+          + SUM(CASE WHEN c.type = 'transfer' AND t.amount > 0 THEN t.amount ELSE 0 END) as revenus,
         SUM(CASE WHEN c.type = 'expense' THEN ABS(t.amount) ELSE 0 END) as depenses,
         SUM(CASE WHEN c.type = 'dette' THEN ABS(t.amount) ELSE 0 END) as credits,
         SUM(CASE WHEN c.type = 'transfer' AND t.amount < 0 THEN ABS(t.amount) ELSE 0 END) as transferts

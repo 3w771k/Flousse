@@ -290,6 +290,13 @@ export default function DashboardPage() {
       byParentTrf[pId] = (byParentTrf[pId] || 0) + abs;
       if (!bySubTrf[pId]) bySubTrf[pId] = {};
       bySubTrf[pId][t.category_id] = (bySubTrf[pId][t.category_id] || 0) + abs;
+    } else if (cat.type === "transfer" && t.amount > 0) {
+      // Incoming transfer = revenue for this person's accounts
+      income += abs;
+      const pId = cat.parent_id || cat.id;
+      byParentInc[pId] = (byParentInc[pId] || 0) + abs;
+      if (!bySubInc[pId]) bySubInc[pId] = {};
+      bySubInc[pId][t.category_id] = (bySubInc[pId][t.category_id] || 0) + abs;
     } else if (cat.type === "expense") {
       expense += abs;
       const pId = cat.parent_id || cat.id;

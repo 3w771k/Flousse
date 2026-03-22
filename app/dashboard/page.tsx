@@ -102,7 +102,6 @@ export default function DashboardPage() {
   const [explorerCatId, setExplorerCatId] = useState<string | null>(null);
   const [explorerTxs, setExplorerTxs] = useState<Transaction[]>([]);
   const [explorerHistory, setExplorerHistory] = useState<{ month: string; total: number }[]>([]);
-  const [explorerInsight, setExplorerInsight] = useState<{ type: string; title: string; body: string; metric: string | null }[] | null>(null);
   const [explorerLoading, setExplorerLoading] = useState(false);
   const [reclassifyingId, setReclassifyingId] = useState<string | null>(null);
   const [reclassifyOpenId, setReclassifyOpenId] = useState<string | null>(null);
@@ -192,7 +191,6 @@ export default function DashboardPage() {
   const openExplorer = useCallback(async (catId: string) => {
     setExplorerCatId(catId);
     setExplorerLoading(true);
-    setExplorerInsight(null);
     setExplorerTxs([]);
     setExplorerHistory([]);
 
@@ -223,18 +221,7 @@ export default function DashboardPage() {
     setExplorerHistory(historyData);
     setExplorerLoading(false);
 
-    // Fetch AI insight (non-blocking)
-    try {
-      const insRes = await fetch("/api/analyze", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tab: `category-insight-${catId}`, from: range.from, to: range.to }),
-      });
-      if (insRes.ok) {
-        const insData = await insRes.json();
-        setExplorerInsight(JSON.parse(insData.content));
-      }
-    } catch { /* ignore */ }
+    // AI insight removed — use Chat IA for on-demand analysis
   }, [range, ownerFilter, accounts]);
 
   const reclassifyTransaction = async (txId: string, newCatId: string) => {
@@ -468,6 +455,8 @@ export default function DashboardPage() {
             const pct = budget ? Math.min((total / budget) * 100, 120) : null;
             const color = CAT_COLORS[cat!.id] || "#AEAEB2";
             const overBudget = pct != null && pct > 100;
+            const showInline = viewMode !== "depenses";
+            const subEntries = Object.entries(subs).sort((a, b) => b[1] - a[1]);
             return (
               <div key={cat!.id}>
                 <button
@@ -476,7 +465,7 @@ export default function DashboardPage() {
                 >
                   <div style={{ width: 8, height: 8, borderRadius: "50%", background: color, flexShrink: 0 }} />
                   <span style={{ flex: 1, fontSize: 14, color: "#1D1D1F" }}>{cat!.name}</span>
-                  <span style={{ fontSize: 10, color: "#AEAEB2" }}>›</span>
+                  {viewMode === "depenses" && <span style={{ fontSize: 10, color: "#AEAEB2" }}>›</span>}
                   <div style={{ textAlign: "right" }}>
                     <span style={{ fontSize: 16, fontWeight: 500, color: viewMode === "depenses" && overBudget ? "#FF3B30" : "#1D1D1F" }}>{fe(total)}</span>
                     {viewMode === "depenses" && budget != null && <span style={{ fontSize: 11, color: overBudget ? "#FF3B30" : "#86868B", display: "block" }}>/{fe(budget)}</span>}
@@ -493,7 +482,19 @@ export default function DashboardPage() {
                   </div>
                 )}
 
-                {/* Subcategory details now shown in explorer slide-over */}
+                {showInline && subEntries.length > 1 && (
+                  <div style={{ margin: "0 0 8px 20px" }}>
+                    {subEntries.map(([subId, subTotal]) => {
+                      const sub = cats.get(subId);
+                      return (
+                        <div key={subId} style={{ display: "flex", justifyContent: "space-between", padding: "3px 0" }}>
+                          <span style={{ fontSize: 12, color: "#86868B" }}>{sub?.name || subId}</span>
+                          <span style={{ fontSize: 12, color: "#86868B" }}>{fe(subTotal)}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             );
           })}
@@ -584,24 +585,6 @@ export default function DashboardPage() {
                         </div>
                       ))}
                     </div>
-                  </div>
-                )}
-
-                {/* AI Insight */}
-                {explorerInsight && explorerInsight.length > 0 && (
-                  <div style={{ marginBottom: 20 }}>
-                    {explorerInsight.map((ins, i) => {
-                      const insColor = ins.type === "alert" ? "#FF3B30" : ins.type === "warning" ? "#FF9500" : ins.type === "positive" ? "#34C759" : "#007AFF";
-                      return (
-                        <div key={i} style={{ borderRadius: 12, background: "white", padding: "12px 16px", border: `1px solid ${insColor}22`, marginBottom: 8 }}>
-                          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-                            <span style={{ fontSize: 12, fontWeight: 600, color: insColor }}>{ins.title}</span>
-                            {ins.metric && <span style={{ fontSize: 10, background: `${insColor}15`, color: insColor, padding: "1px 6px", borderRadius: 4 }}>{ins.metric}</span>}
-                          </div>
-                          <div style={{ fontSize: 12, color: "#86868B", lineHeight: 1.4 }} dangerouslySetInnerHTML={{ __html: ins.body }} />
-                        </div>
-                      );
-                    })}
                   </div>
                 )}
 
